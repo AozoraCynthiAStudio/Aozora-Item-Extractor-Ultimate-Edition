@@ -1,0 +1,14 @@
+{
+  "modName": "AozoraItemExtractor",
+  "keybinds": [
+    {
+      "id": "AIE_MenuHotkey",
+      "desc": "$AIE_MCM_HOTKEY_DESC",
+      "action": {
+        "type": "CallGlobalFunction",
+        "script": "AozoraItemExtractor",
+        "function": "OnMcmMenuHotkey"
+      }
+    }
+  ]
+}

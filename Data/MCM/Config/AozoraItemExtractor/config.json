@@ -1,0 +1,77 @@
+{
+  "modName": "AozoraItemExtractor",
+  "displayName": "$AIE_MCM_TITLE",
+  "minMcmVersion": 1,
+  "pluginRequirements": [
+    "AozoraItemExtractor.esp"
+  ],
+  "content": [
+    {
+      "type": "section",
+      "text": "$AIE_MCM_SECTION_APPEARANCE"
+    },
+    {
+      "id": "bMascotEnabled:General",
+      "type": "switcher",
+      "text": "$AIE_MCM_MASCOT_TEXT",
+      "help": "$AIE_MCM_MASCOT_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingBool",
+        "default": true
+      }
+    },
+    {
+      "id": "iThemeColorMode:General",
+      "type": "dropdown",
+      "text": "$AIE_MCM_THEME_SOURCE",
+      "help": "$AIE_MCM_THEME_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingInt",
+        "default": 0,
+        "options": [
+          "$AIE_MCM_THEME_FOLLOW_HUD",
+          "$AIE_MCM_THEME_PRESET_MODE"
+        ]
+      }
+    },
+    {
+      "id": "iThemeColorPreset:General",
+      "type": "dropdown",
+      "text": "$AIE_MCM_PRESET_HEADER",
+      "help": "$AIE_MCM_PRESET_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingInt",
+        "default": 0,
+        "options": [
+          "$AIE_MCM_PRESET_GREEN",
+          "$AIE_MCM_PRESET_AMBER",
+          "$AIE_MCM_PRESET_ICE",
+          "$AIE_MCM_PRESET_RUST",
+          "$AIE_MCM_PRESET_LAVENDER",
+          "$AIE_MCM_PRESET_WHITE"
+        ]
+      }
+    },
+    {
+      "type": "section",
+      "text": "$AIE_MCM_SECTION_HOTKEY"
+    },
+    {
+      "id": "AIE_MenuHotkey",
+      "type": "hotkey",
+      "text": "$AIE_MCM_HOTKEY_TEXT",
+      "help": "$AIE_MCM_HOTKEY_HELP",
+      "valueOptions": {
+        "allowModifierKeys": true
+      }
+    },
+    {
+      "type": "section",
+      "text": "$AIE_MCM_SECTION_ABOUT"
+    },
+    {
+      "type": "text",
+      "text": "$AIE_MCM_SUMMARY"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+* text=auto
+*.cpp text eol=lf
+*.h text eol=lf
+*.lua text eol=lf
+*.ps1 text eol=lf
+*.psc text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.dll binary
+*.esp binary
+*.pex binary
+*.zip binary
+*.png binary

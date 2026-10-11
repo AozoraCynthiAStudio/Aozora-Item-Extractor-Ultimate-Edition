@@ -1,0 +1,15 @@
+**/.xmake/
+**/build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.log
+*.tmp
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini
+vendor/
+package/formal/*/

@@ -1,0 +1,7 @@
+[b]Aozora Item Extractor Ultimate Edition v1.0.0[/b]
+
+原生 F4SE 模组物品提取器：支持插件名/物品名搜索，提取、批量提取、全部提取，以及归还、批量归还、全部归还。支持键盘、鼠标、手柄；MCM 可选，背包提供启动物品。跟随 HUD 配色，辐射娘和气泡可关闭。完整简体中文补丁单独安装。
+
+Native F4SE item extractor with plugin/item discovery, take and return actions, batch quantities and all-item actions. Keyboard, mouse and controller support. Optional MCM, inventory launcher, HUD theme colors and optional mascot tips. Separate Simplified Chinese patch.
+
+Requires matching F4SE and Address Library. Enable AozoraItemExtractor.esp.
