@@ -18,6 +18,8 @@
 
 用于 Fallout 4 的模组物品提取器。采用 **Aozora 风格界面**，支持 **键鼠与手柄**，并借鉴社区同类工具中成熟、实用的功能，将查找、提取和归还整理为一致的双栏操作体验。
 
+**English:** A Fallout 4 item extractor with an Aozora-styled UI, keyboard/mouse and controller support, and practical features inspired by community item extractors. [Read the full English description](docs/README_EN.md).
+
 这是 Ultimate Edition 的首个可用发布版本，**v1.0.2**。内部插件名、脚本及表单标识沿用原实现。
 
 ## 界面预览
@@ -103,7 +105,7 @@
 
 1. 安装与游戏版本匹配的 **F4SE**、**Address Library for F4SE Plugins** 和 VC++ x64 运行库。
 2. 在 Releases 下载英文主体，用 MO2 等管理器安装并启用 `AozoraItemExtractor.esp`（ESL 标记）。
-3. 如需中文，再安装 **CHS Patch**，让它覆盖英文主体；停用旧 CHS_Name / CHS_Tips 补丁。需要中文字体环境。
+3. 如需中文，再安装 **CHS Patch**，让它覆盖英文主体即可汉化。需要中文字体环境。
 4. 通过 F4SE 启动游戏、加载存档，在 MCM 绑定热键或使用背包中的启动物品。
 
 MCM / F4MCM 可选。汉化补丁覆盖完整功能文字及同名 ESP 的启动物品显示名，不增加插件槽位。主菜单标题仍为 AOZORA / ITEM EXTRACTOR；中文 MCM 名称为“青空物品提取器终极版”。
