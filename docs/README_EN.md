@@ -4,7 +4,7 @@
 
 [Downloads](https://github.com/AozoraCynthiAStudio/Aozora-Item-Extractor-Ultimate-Edition/releases/latest) · [中文](../README.md) · [Build](BUILD.md)
 
-A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. This is the first usable public release, **v1.0.2**.
+A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. The current release is **v1.0.3**, with consistent theme colors for list text and FIS icons.
 
 ![Extraction menu](../发布物料/Extractor.png)
 
@@ -80,3 +80,4 @@ AS3: `src/as3`. Native CommonLibF4: `src/native`. Papyrus and runtime files: `Da
 Community influence is credited explicitly: [In-Game-Mod-Explorer](https://github.com/Perchik71/In-Game-Mod-Explorer) for plugin enumeration/ownership, portable item filtering and cache lifecycle ideas; Aozora Favorites for the related visual/input style; Barlow Condensed for header fonts.
 
 [Non-Commercial Open License](../LICENSE.md) · [Third-party notices](../THIRD_PARTY_NOTICES.md).
+

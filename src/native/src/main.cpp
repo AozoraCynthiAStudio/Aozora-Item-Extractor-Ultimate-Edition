@@ -1254,7 +1254,7 @@ namespace
 
 AIE_EXPORT F4SE::PluginVersionData F4SEPlugin_Version = []() noexcept {
     F4SE::PluginVersionData version{};
-    version.PluginVersion({ 1, 0, 2, 0 });
+    version.PluginVersion({ 1, 0, 3, 0 });
     version.PluginName(kPluginName);
     version.AuthorName("Aozora");
     version.UsesAddressLibrary(true);

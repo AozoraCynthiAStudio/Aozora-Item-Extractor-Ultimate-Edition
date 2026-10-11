@@ -759,7 +759,7 @@ package aozora.extractor
             var count:int = value.matchCount ? int(value.matchCount) : 0;
             var countWidth:Number = count > 0 ? Math.max(48, String(count).length * 8 + 18) : 0;
             var label:TextField = addTextTo(row, 42, 4, width - 52 - countWidth,
-                String(value.name || ""), 14, PRIMARY_ROW_TEXT, 1, false, "left");
+                String(value.name || ""), 14, themeColor(0.92), 1, false, "left");
             if (count > 0) addTextTo(row, width - countWidth - 8, 5, countWidth,
                 "\u00D7" + count, 12, secondaryText, 0.88, false, "right");
             label.name = "rowName";
@@ -777,7 +777,7 @@ package aozora.extractor
             drawRowFrame(row, selected, width, height, focusColor);
             var label:TextField = row.getChildByName("rowName") as TextField;
             if (label) {
-                label.defaultTextFormat = makeFormat(14, selected ? SELECTED_ROW_TEXT : PRIMARY_ROW_TEXT, 1, false, "left");
+                label.defaultTextFormat = makeFormat(14, themeColor(0.92), 1, false, "left");
                 label.setTextFormat(label.defaultTextFormat);
             }
         }
@@ -1275,7 +1275,7 @@ package aozora.extractor
             var countWidth:Number = kind == "plugin" || kind == "plugins" ? 0 : (kind == "left" && returnable > 0 && returnable < uint(value.count || 0) ? 78 : 58);
             var nameWidth:Number = Math.max(24, width - 40 - countWidth - 18);
             var nameField:TextField = addTextTo(row, 40, 4, nameWidth, label, 14,
-                unavailable ? UNAVAILABLE_ROW_TEXT : (selected ? SELECTED_ROW_TEXT : PRIMARY_ROW_TEXT),
+                unavailable ? themeColor(0.55) : themeColor(0.92),
                 unavailable ? DISABLED_ALPHA : 1, false, "left");
             nameField.name = "rowName";
             var count:String;
@@ -1284,7 +1284,7 @@ package aozora.extractor
             else count = "x" + String(value.count || value.group || 1);
             if (count.length > 0) {
                 var countField:TextField = addTextTo(row, width - countWidth - 10, 5,
-                    countWidth, count, 12, unavailable ? UNAVAILABLE_COUNT_TEXT : themeColor(0.92),
+                    countWidth, count, 12, unavailable ? themeColor(0.55) : themeColor(0.92),
                     unavailable ? DISABLED_ALPHA : (selected ? 1 : SECONDARY_ALPHA), false, "right");
                 countField.name = "rowCount";
             }
@@ -1309,6 +1309,7 @@ package aozora.extractor
                             if (display) {
                                 if (display is Sprite) Sprite(display).mouseEnabled = false;
                                 fitIconSlot(display, x, y);
+                                setIconColor(display, color);
                                 target.addChild(display);
                                 return;
                             }
@@ -1457,23 +1458,22 @@ package aozora.extractor
             var icon:Sprite = row.getChildByName("rowIcon") as Sprite;
             if (icon) {
                 icon.alpha = unavailable ? 0.55 : (selected ? 1 : 0.86);
-                var fallback:Sprite = icon.getChildByName("fallbackGlyph") as Sprite;
-                if (fallback) {
+                if (icon.numChildren > 0) {
                     var iconColor:uint = themeColor(1.0);
-                    setIconColor(fallback, iconColor);
+                    setIconColor(icon.getChildAt(0), iconColor);
                 }
             }
             var nameField:TextField = row.getChildByName("rowName") as TextField;
             if (nameField) {
-                var nameColor:uint = unavailable ? UNAVAILABLE_ROW_TEXT :
-                    (selected ? SELECTED_ROW_TEXT : PRIMARY_ROW_TEXT);
+                var nameColor:uint = unavailable ? themeColor(0.55) :
+                    (themeColor(0.92));
                 nameField.alpha = unavailable ? DISABLED_ALPHA : 1;
                 nameField.defaultTextFormat = makeFormat(14, nameColor, 1, false, "left");
                 nameField.setTextFormat(nameField.defaultTextFormat);
             }
             var countField:TextField = row.getChildByName("rowCount") as TextField;
             if (countField) {
-                var countColor:uint = unavailable ? UNAVAILABLE_COUNT_TEXT : themeColor(0.92);
+                var countColor:uint = unavailable ? themeColor(0.55) : themeColor(0.92);
                 countField.alpha = unavailable ? DISABLED_ALPHA : (selected ? 1 : SECONDARY_ALPHA);
                 countField.defaultTextFormat = makeFormat(12, countColor, 1, false, "right");
                 countField.setTextFormat(countField.defaultTextFormat);
@@ -2431,7 +2431,7 @@ package aozora.extractor
         }
 
         // Ported/adapted from Aozora Favorites SkyuiLikeMenuPanel.
-        private function setIconColor(icon:Sprite, color:uint):void
+        private function setIconColor(icon:DisplayObject, color:uint):void
         {
             if (!icon)
                 return;
@@ -2827,3 +2827,4 @@ package aozora.extractor
         }
     }
 }
+

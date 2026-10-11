@@ -20,7 +20,7 @@
 
 **English:** A Fallout 4 item extractor with an Aozora-styled UI, keyboard/mouse and controller support, and practical features inspired by community item extractors. [Read the full English description](docs/README_EN.md).
 
-这是 Ultimate Edition 的首个可用发布版本，**v1.0.2**。内部插件名、脚本及表单标识沿用原实现。
+当前版本为 **v1.0.3**，统一列表文字与 FIS 图标的主题配色。内部插件名、脚本及表单标识沿用原实现。
 
 ## 界面预览
 
@@ -132,3 +132,4 @@ tools/         构建与打包工具
 - Barlow Condensed：标题字体，SIL Open Font License。
 
 详细许可及使用范围见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)。
+

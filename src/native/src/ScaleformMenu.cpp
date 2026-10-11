@@ -1,4 +1,5 @@
 #include "ScaleformMenu.h"
+#include "PreviewSpike.h"
 
 #include <algorithm>
 #include <array>
@@ -151,6 +152,20 @@ namespace AIE::ScaleformUI
                 if (g_menu == this) g_menu = nullptr;
             }
 
+#ifdef AIE_PREVIEW_SPIKE
+            AIE::PreviewSpike::Probe previewProbe_;
+            void AdvanceMovie(float delta, std::uint64_t time) override
+            {
+                RE::GameMenuBase::AdvanceMovie(delta, time);
+                bool extraction = false;
+                {
+                    std::lock_guard lock(g_stateMutex);
+                    extraction = g_snapshot.page != "nav" && !g_hidden;
+                }
+                previewProbe_.Tick(uiMovie.get(), extraction);
+            }
+#endif
+
             void MapCodeObjectFunctions() override
             {
                 MapCodeMethodToASFunction("Initialize", static_cast<std::int32_t>(NativeFunction::kInitialize));
@@ -245,6 +260,9 @@ namespace AIE::ScaleformUI
 
             void OnRemovedFromMenuStack() override
             {
+#ifdef AIE_PREVIEW_SPIKE
+                previewProbe_.Clear();
+#endif
                 EndHUDIsolation();
                 Callbacks callbacks;
                 {
