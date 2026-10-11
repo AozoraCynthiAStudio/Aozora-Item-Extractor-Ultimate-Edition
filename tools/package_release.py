@@ -52,7 +52,7 @@ for lang in ['en','cn']:
  p=patch/f'Interface/Translations/AozoraItemExtractor_{lang}.txt';p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(text)
 (patch/'AozoraItemExtractor.esp').write_bytes(translated);shutil.copyfile(r/'README_汉化补丁.txt',patch/'README_汉化补丁.txt');writezip(patch,out/(patchName+'.zip'))
 with zipfile.ZipFile(out/(sourceName+'.zip'),'w',zipfile.ZIP_DEFLATED) as z:
- for folder in ['src','assets','Data','mcm','translations','tools','docs','licenses']:
+ for folder in ['src','assets','Data','mcm','translations','tools','docs','licenses','发布物料']:
   for p in sorted((r/folder).rglob('*')):
    if p.is_file() and not any(v in ['build','.xmake','__pycache__'] for v in p.relative_to(r/folder).parts):z.write(p,p.relative_to(r).as_posix())
  for p in r.iterdir():
