@@ -1,4 +1,4 @@
-Aozora模组物品提取器 终极版 v1.0.3
+Aozora模组物品提取器 终极版 v1.0.4
 先安装英文主体并启用 AozoraItemExtractor.esp，通过 F4SE 启动游戏。
 需要匹配游戏版本的 F4SE、Address Library 及 VC++ x64 运行库。MCM 可选。
 在 MCM 中绑定菜单热键，或使用 Pip-Boy“辅助”分类中的启动物品。

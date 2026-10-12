@@ -944,7 +944,7 @@ package aozora.extractor
             searchField.type = "dynamic";
             searchField.selectable = false;
             searchField.tabEnabled = false;
-            searchField.width = width - 42;
+            searchField.width = width - (searchFocused ? 225 : 42);
             searchField.height = 26;
             searchField.x = x + 32;
             searchField.y = y + 3;
@@ -965,11 +965,12 @@ package aozora.extractor
             if (query.length == 0 && !searchFocused)
                 drawFixedText(x + 34, y + 7, width - 42, TEXT.searchPlaceholder, 13, PRIMARY_ROW_TEXT, 0.78, false, "left");
             if (searchFocused) {
+                drawFixedText(x + width - 191, y + 9, 183, "$AIE_SEARCH_EDITING", 10, focusColor, 1, false, "right");
                 var caret:Shape = new Shape();
                 var prefix:TextField = new TextField();
                 prefix.defaultTextFormat = searchField.defaultTextFormat;
                 prefix.text = query.substr(0, searchCaretIndex);
-                var caretX:Number = Math.min(x + width - 8, x + 34 + prefix.textWidth);
+                var caretX:Number = Math.min(x + 32 + searchField.width - 3, x + 34 + prefix.textWidth);
                 caret.graphics.lineStyle(1, focusColor, 1);
                 caret.graphics.moveTo(caretX, y + 7);
                 caret.graphics.lineTo(caretX, y + 24);
@@ -984,10 +985,14 @@ package aozora.extractor
             var g:Graphics = searchChrome.graphics;
             var color:uint = searchFocused || searchHovered ? focusColor : themeColor(0.55);
             g.clear();
-            g.beginFill(color, searchFocused ? 0.09 : (searchHovered ? 0.05 : 0.001));
+            g.beginFill(color, searchFocused ? 0.18 : (searchHovered ? 0.05 : 0.001));
             g.drawRect(searchArea.x, searchArea.y, searchArea.width, searchArea.height);
             g.endFill();
-            g.lineStyle(searchFocused ? 2 : 1, color, searchFocused ? 0.95 : (searchHovered ? 0.78 : 0.28));
+            if (searchFocused) {
+                g.lineStyle(1.5, color, 0.90);
+                g.drawRect(searchArea.x, searchArea.y, searchArea.width, searchArea.height);
+            }
+            g.lineStyle(searchFocused ? 2.5 : 1, color, searchFocused ? 0.95 : (searchHovered ? 0.78 : 0.28));
             g.moveTo(searchArea.x, searchArea.y + 31);
             g.lineTo(searchArea.right, searchArea.y + 31);
             g.lineStyle(1.5, searchFocused || searchHovered ? focusColor : accent, searchHovered || searchFocused ? 1 : 0.80);
@@ -2766,6 +2771,8 @@ package aozora.extractor
             var field:TextField = makeText(key, 14, 10, 16, themeColor(0.98), false);
             if (key == "$AIE_MASCOT_AMMO_GROUP_TIP")
                 field.text = field.text.replace("{count}", String(uint(item.group || 1)));
+            else if (key == "$AIE_MASCOT_AMMO_TIP")
+                field.text = field.text.replace("{count}", String(uint(item.starterAmmoCount || 0)));
             // Localized game fonts retain Chinese glyph support. Chinese gets a
             // shorter measure; English needs more room for words and spaces.
             var chinese:Boolean = false;

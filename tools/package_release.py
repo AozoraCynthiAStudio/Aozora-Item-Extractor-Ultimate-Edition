@@ -1,6 +1,9 @@
 from pathlib import Path
 import zipfile,struct,hashlib,shutil,json
 r=Path(__file__).resolve().parents[1];version=(r/'VERSION.txt').read_text().strip();out=r/'package/formal';out.mkdir(parents=True,exist_ok=True)
+dll = r/'Data/F4SE/Plugins/AozoraItemExtractor.dll'
+if b'PreviewSpike07' in dll.read_bytes():
+ raise RuntimeError('Experimental 3D preview detected in runtime DLL. Rebuild with --preview_spike=n before packaging.')
 coreName=f'Aozora Item Extractor Ultimate Edition v{version}'
 patchName=f'Aozora Item Extractor Ultimate Edition CHS Patch v{version}'
 sourceName=f'Aozora Item Extractor Ultimate Edition Source v{version}'
@@ -54,7 +57,7 @@ for lang in ['en','cn']:
 with zipfile.ZipFile(out/(sourceName+'.zip'),'w',zipfile.ZIP_DEFLATED) as z:
  for folder in ['src','assets','Data','mcm','translations','tools','docs','licenses','发布物料']:
   for p in sorted((r/folder).rglob('*')):
-   if p.is_file() and not any(v in ['build','.xmake','__pycache__'] for v in p.relative_to(r/folder).parts):z.write(p,p.relative_to(r).as_posix())
+   if p.is_file() and not (folder == '发布物料' and p.suffix.lower() in {'.mp4','.mov','.mkv','.webm','.avi'}) and not any(v in ['build','.xmake','__pycache__'] for v in p.relative_to(r/folder).parts):z.write(p,p.relative_to(r).as_posix())
  for p in r.iterdir():
   if p.is_file() and (p.suffix in ['.md','.txt'] or p.name in ['.gitignore','.gitattributes']):z.write(p,p.name)
 lines=[]

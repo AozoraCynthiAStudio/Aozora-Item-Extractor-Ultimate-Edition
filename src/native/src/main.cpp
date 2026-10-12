@@ -47,7 +47,6 @@ namespace
     constexpr std::uint32_t kLauncherLocalFormID = 0x800;
     constexpr std::uint32_t kSerializationID = 'AoIE';
     constexpr std::size_t kTakeAllBatchSize = 64;
-    constexpr std::uint32_t kWeaponAmmoGrant = 1000;
     constexpr ULONGLONG kMenuOpenDebounceMs = 250;
     constexpr ULONGLONG kMenuReopenAfterCloseMs = 300;
 
@@ -66,6 +65,7 @@ namespace
         std::uint32_t weapon = 1;
         std::uint32_t armor = 1;
         std::uint32_t ammo = 100;
+        std::uint32_t weaponAmmo = 1000;
         std::uint32_t aid = 1;
         std::uint32_t grenade = 1;
         std::uint32_t junk = 1;
@@ -155,9 +155,12 @@ namespace
 
     void Log(std::string_view message)
     {
+        REX::INFO("{}", message);
+        static std::mutex logMutex;
+        std::lock_guard logLock(logMutex);
         std::ofstream file(LogPath(), std::ios::app);
         if (file.is_open()) {
-            file << message << '\n';
+            file << "[tick=" << GetTickCount64() << " thread=" << GetCurrentThreadId() << "] " << message << '\n';
         }
     }
 
@@ -212,8 +215,32 @@ namespace
         return static_cast<std::uint32_t>(GetPrivateProfileIntW(section, key, static_cast<INT>(fallback), path.c_str()));
     }
 
+    void ApplyMCMCountSettings()
+    {
+        const auto settings = (GameRoot() / "Data" / "MCM" / "Settings" / "AozoraItemExtractor.ini").wstring();
+        const auto config = ConfigPath().wstring();
+        // Only a changed MCM selection writes the runtime INI. Reading/reopening
+        // menus must preserve custom INI values, including values beyond the UI range.
+        const auto apply = [&](const wchar_t* setting, const wchar_t* stamp,
+                               const wchar_t* key, int fallback, bool preset) {
+            const int selected = GetPrivateProfileIntW(L"Extraction", setting, fallback, settings.c_str());
+            const int previous = GetPrivateProfileIntW(L"MCMState", stamp, fallback, config.c_str());
+            if (selected == previous) return;
+            constexpr int groups[] = { 1, 10, 50, 100, 500, 1000 };
+            const int count = preset ? groups[std::clamp(selected, 0, 5)] : std::clamp(selected, 0, 1000);
+            const auto countText = std::to_wstring(count);
+            const auto stampText = std::to_wstring(selected);
+            if (WritePrivateProfileStringW(L"ItemCount", key, countText.c_str(), config.c_str())) {
+                WritePrivateProfileStringW(L"MCMState", stamp, stampText.c_str(), config.c_str());
+            } else Log("MCM extraction setting write failed");
+        };
+        apply(L"iWeaponAmmo", L"WeaponAmmoSelection", L"WeaponAmmo", 1000, false);
+        apply(L"iAmmoGroupPreset", L"AmmoGroupSelection", L"Ammo", 3, true);
+    }
+
     void ReadConfig()
     {
+        ApplyMCMCountSettings();
         g_config.weapon = std::max(1u, ReadIniUInt(L"ItemCount", L"Weapon", 1));
         g_config.armor = std::max(1u, ReadIniUInt(L"ItemCount", L"Armor", 1));
         g_config.ammo = std::max(1u, ReadIniUInt(L"ItemCount", L"Ammo", 100));
@@ -221,6 +248,7 @@ namespace
         g_config.grenade = std::max(1u, ReadIniUInt(L"ItemCount", L"Grenade", 1));
         g_config.junk = std::max(1u, ReadIniUInt(L"ItemCount", L"Junk", 1));
         g_config.misc = std::max(1u, ReadIniUInt(L"ItemCount", L"Misc", 1));
+        g_config.weaponAmmo = std::min(static_cast<std::uint32_t>(INT32_MAX), ReadIniUInt(L"ItemCount", L"WeaponAmmo", 1000));
         g_config.addLauncherOnLoad = ReadIniUInt(L"General", L"AddLauncherOnLoad", 1) != 0;
     }
 
@@ -726,7 +754,7 @@ namespace
                     auto* object = form ? form->As<RE::TESBoundObject>() : nullptr;
                     const auto icon = AIE::ResolveFISIcon(object, item.name);
                     const auto* weapon = object ? object->As<RE::TESObjectWEAP>() : nullptr;
-                    const auto starterAmmo = item.category == ItemCategory::kWeapon && weapon && weapon->weaponData.ammo ? kWeaponAmmoGrant : 0u;
+                    const auto starterAmmo = item.category == ItemCategory::kWeapon && weapon && weapon->weaponData.ammo ? g_config.weaponAmmo : 0u;
                     snapshot.items.push_back({ item.formID, item.name, CategoryName(item.category), 0,
                         item.groupCount, 0, icon.library, icon.className, starterAmmo });
                 }
@@ -793,6 +821,7 @@ namespace
             g_searchFocused = false;
             g_consoleRequestedAt = 0;
         }
+        Log("MENU_CLOSE session-cleared input-release=" + std::string(deferInputRelease ? "deferred" : "immediate"));
         AIE::ScaleformUI::SetHidden(false);
         AIE::ScaleformUI::Close();
         if (deferInputRelease) {
@@ -838,6 +867,13 @@ namespace
             (lastClose != 0 && now - lastClose < kMenuReopenAfterCloseMs) ||
             !MenuCanOpen()) {
             return false;
+        }
+        ReadConfig();
+        // Scanned item identities remain cached; quantities are live configuration.
+        for (auto& [name, items] : g_itemsByPlugin) {
+            for (auto& item : items) {
+                if (item.category == ItemCategory::kAmmo) item.groupCount = g_config.ammo;
+            }
         }
         ClearSession();
         g_inputMode = std::move(inputMode);
@@ -891,6 +927,11 @@ namespace
         if (!player || !object || !BasicItemValid(form)) return false;
 
         const auto amount = requestedCount > 0 ? requestedCount : item.groupCount;
+        const auto* owner = OwnerFile(item.formID);
+        char identity[64]{};
+        std::snprintf(identity, sizeof(identity), "TAKE_BEGIN form=%08X count=%u ", item.formID, amount);
+        Log(std::string(identity) + "plugin=" + std::string(owner ? owner->GetFilename() : "<none>") +
+            " name=" + item.name + " category=" + CategoryName(item.category));
         auto [it, inserted] = g_session.try_emplace(item.formID);
         auto& session = it->second;
         if (inserted) {
@@ -902,19 +943,25 @@ namespace
         }
         player->AddObjectToContainer(object, {}, static_cast<std::int32_t>(amount), nullptr, RE::ITEM_REMOVE_REASON::kNone);
         if (item.category == ItemCategory::kWeapon) {
-            if (auto* weapon = form->As<RE::TESObjectWEAP>(); weapon && weapon->weaponData.ammo) {
+            if (auto* weapon = form->As<RE::TESObjectWEAP>(); weapon && weapon->weaponData.ammo && g_config.weaponAmmo > 0) {
                 // Give one fixed starter stack per weapon extraction action.
                 // Melee, grenade, and mine weapons simply have no base ammo
                 // and therefore receive nothing here.
+                char ammoInfo[96]{};
+                std::snprintf(ammoInfo, sizeof(ammoInfo), "BONUS_AMMO form=%08X count=%u",
+                    weapon->weaponData.ammo->GetFormID(), g_config.weaponAmmo);
+                Log(ammoInfo);
                 player->AddObjectToContainer(
                     weapon->weaponData.ammo,
                     {},
-                    static_cast<std::int32_t>(kWeaponAmmoGrant),
+                    static_cast<std::int32_t>(g_config.weaponAmmo),
                     nullptr,
                     RE::ITEM_REMOVE_REASON::kNone);
             }
         }
         session.totalTaken += amount;
+        std::snprintf(identity, sizeof(identity), "TAKE_COMPLETE form=%08X count=%u", item.formID, amount);
+        Log(identity);
         return true;
     }
 
@@ -1239,6 +1286,12 @@ namespace
     void F4SEMessageHandler(F4SE::MessagingInterface::Message* message)
     {
         if (!message) return;
+        if (message->type == F4SE::MessagingInterface::kPreSaveGame ||
+            message->type == F4SE::MessagingInterface::kPostSaveGame) {
+            Log(std::string(message->type == F4SE::MessagingInterface::kPreSaveGame ? "SAVE_BEGIN" : "SAVE_END") +
+                " menu-open=" + std::to_string(g_menuOpen) +
+                " transfer-queued=" + std::to_string(g_transferQueued.load()));
+        }
         if (message->type == F4SE::MessagingInterface::kInputLoaded ||
             message->type == F4SE::MessagingInterface::kGameLoaded ||
             message->type == F4SE::MessagingInterface::kPostLoadGame) {
@@ -1254,7 +1307,7 @@ namespace
 
 AIE_EXPORT F4SE::PluginVersionData F4SEPlugin_Version = []() noexcept {
     F4SE::PluginVersionData version{};
-    version.PluginVersion({ 1, 0, 3, 0 });
+    version.PluginVersion({ 1, 0, 4, 0 });
     version.PluginName(kPluginName);
     version.AuthorName("Aozora");
     version.UsesAddressLibrary(true);
@@ -1392,8 +1445,13 @@ bool RegisterPapyrus(RE::BSScript::IVirtualMachine* vm)
 
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* f4seInterface)
 {
-    F4SE::Init(f4seInterface, { .log = false });
-    Log("Aozora Item Extractor load");
+    F4SE::Init(f4seInterface, { .log = true, .logName = "AozoraItemExtractor" });
+    Log("Aozora Item Extractor load build=release-1.0.4-20261012 runtime=" + F4SE::GetRuntimeVersion().string());
+#ifdef AIE_PREVIEW_SPIKE
+    Log("EXPERIMENTAL_PREVIEW enabled");
+#else
+    Log("EXPERIMENTAL_PREVIEW disabled");
+#endif
     ReadConfig();
     ConfigureScaleformCallbacks();
     if (auto* messaging = F4SE::GetMessagingInterface()) {

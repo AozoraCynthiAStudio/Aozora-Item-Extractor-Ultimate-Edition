@@ -54,6 +54,41 @@
     },
     {
       "type": "section",
+      "text": "$AIE_MCM_SECTION_EXTRACTION"
+    },
+    {
+      "id": "iWeaponAmmo:Extraction",
+      "type": "slider",
+      "text": "$AIE_MCM_WEAPON_AMMO",
+      "help": "$AIE_MCM_WEAPON_AMMO_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingInt",
+        "default": 1000,
+        "min": 0,
+        "max": 1000,
+        "step": 100
+      }
+    },
+    {
+      "id": "iAmmoGroupPreset:Extraction",
+      "type": "stepper",
+      "text": "$AIE_MCM_AMMO_GROUP",
+      "help": "$AIE_MCM_AMMO_GROUP_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingInt",
+        "default": 3,
+        "options": [
+          "1",
+          "10",
+          "50",
+          "100",
+          "500",
+          "1000"
+        ]
+      }
+    },
+    {
+      "type": "section",
       "text": "$AIE_MCM_SECTION_HOTKEY"
     },
     {

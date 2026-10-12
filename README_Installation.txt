@@ -1,4 +1,4 @@
-Aozora Item Extractor Ultimate Edition v1.0.3
+Aozora Item Extractor Ultimate Edition v1.0.4
 Requirements: Fallout 4, matching F4SE and Address Library, VC++ x64 runtime. MCM optional.
 Install the English core using a mod manager; enable AozoraItemExtractor.esp and launch through F4SE.
 Bind the menu hotkey in MCM or use the Aozora Item Extractor Aid item in Pip-Boy.

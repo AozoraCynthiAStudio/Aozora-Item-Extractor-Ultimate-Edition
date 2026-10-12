@@ -7,7 +7,7 @@ $nativeRoot = Join-Path $projectRoot 'src/native'
 & (Join-Path $PSScriptRoot 'Build_ESP.ps1') -Language EN
 Push-Location $nativeRoot
 try {
-    & xmake f -m releasedbg -y
+    & xmake f -m releasedbg --preview_spike=n -y
     if ($LASTEXITCODE -ne 0) { throw 'Native configuration failed' }
     & xmake -j2
     if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }

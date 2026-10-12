@@ -13,3 +13,15 @@ Thumbs.db
 Desktop.ini
 vendor/
 package/formal/*/
+
+# Release videos are local promotional materials, not build inputs.
+发布物料/**/*.mp4
+发布物料/*.mp4
+发布物料/**/*.mov
+发布物料/*.mov
+发布物料/**/*.mkv
+发布物料/*.mkv
+发布物料/**/*.webm
+发布物料/*.webm
+发布物料/**/*.avi
+发布物料/*.avi
