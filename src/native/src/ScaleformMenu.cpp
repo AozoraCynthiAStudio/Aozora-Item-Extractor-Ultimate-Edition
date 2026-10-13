@@ -1,3 +1,6 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "ScaleformMenu.h"
 #include "PreviewSpike.h"
 
@@ -15,6 +18,7 @@
 #include "RE/B/BSScaleformManager.h"
 #include "RE/B/BS_BUTTON_CODE.h"
 #include "RE/B/ButtonEvent.h"
+#include "RE/C/ControlMap.h"
 #include "RE/Fallout.h"
 #include "RE/G/GameMenuBase.h"
 #include "RE/I/INPUT_EVENT_TYPE.h"
@@ -27,6 +31,7 @@
 #include "RE/U/UI_MENU_FLAGS.h"
 #include "RE/U/UI_MESSAGE_TYPE.h"
 #include "Scaleform/G/GFx_ASMovieRootBase.h"
+#include <Windows.h>
 
 namespace AIE::ScaleformUI
 {
@@ -70,6 +75,17 @@ namespace AIE::ScaleformUI
         bool g_registered{ false };
         bool g_searchFocused{ false };
         bool g_hidden{ false };
+        bool g_textEntryOwned{ false };
+
+        const char* g_textEntryBridgePath{ nullptr };
+        void SetSearchTextEntryMode(bool enabled);
+
+        void ClearSearchTextEntry()
+        {
+            SetSearchTextEntryMode(false);
+            g_searchFocused = false;
+            if (g_callbacks.searchFocus) g_callbacks.searchFocus(false);
+        }
 
         std::uint32_t ParamUInt32(const FunctionParams& params, std::uint32_t index)
         {
@@ -148,6 +164,7 @@ namespace AIE::ScaleformUI
 
             ~ItemExtractorMenu() override
             {
+                ClearSearchTextEntry();
                 EndHUDIsolation();
                 if (g_menu == this) g_menu = nullptr;
             }
@@ -242,6 +259,7 @@ namespace AIE::ScaleformUI
                     break;
                 case NativeFunction::kSearchFocus:
                     g_searchFocused = ParamBool(params, 0);
+                    SetSearchTextEntryMode(g_searchFocused && !g_hidden);
                     if (callbacks.searchFocus) callbacks.searchFocus(g_searchFocused);
                     break;
                 default:
@@ -260,6 +278,7 @@ namespace AIE::ScaleformUI
 
             void OnRemovedFromMenuStack() override
             {
+                ClearSearchTextEntry();
 #ifdef AIE_PREVIEW_SPIKE
                 previewProbe_.Clear();
 #endif
@@ -306,6 +325,15 @@ namespace AIE::ScaleformUI
                     auto* handledEvent = const_cast<RE::ButtonEvent*>(event);
                     handledEvent->handled = RE::InputEvent::HANDLED_RESULT::kStop;
                     const auto button = static_cast<RE::BS_BUTTON_CODE>(code);
+                    // Pass standard Ctrl editing commands to the focused input
+                    // field (and optional Scaleform copy/paste plugins).
+                    if ((GetAsyncKeyState(0x11) & 0x8000) != 0 &&
+                        (button == RE::BS_BUTTON_CODE::kA || button == RE::BS_BUTTON_CODE::kC ||
+                         button == RE::BS_BUTTON_CODE::kV || button == RE::BS_BUTTON_CODE::kX)) {
+                        handledEvent->handled = RE::InputEvent::HANDLED_RESULT::kUnhandled;
+                        RE::IMenu::OnButtonEvent(event);
+                        return;
+                    }
                     if (button == RE::BS_BUTTON_CODE::kEscape || button == RE::BS_BUTTON_CODE::kTab) {
                         SendKey("back");
                         return;
@@ -381,13 +409,22 @@ namespace AIE::ScaleformUI
             {
                 if (!event || !g_searchFocused || event->charCode < 0x20 || event->charCode == 0x7F) return;
                 const_cast<RE::CharacterEvent*>(event)->handled = RE::InputEvent::HANDLED_RESULT::kStop;
+                if (event->charCode >= 0x80)
+                    REX::INFO("[AIE] SEARCH_UNICODE code={}", event->charCode);
                 Scaleform::GFx::Value character(event->charCode);
                 InvokePanel("root1.Menu_mc.HandleSearchCharacter", std::addressof(character), 1);
             }
 
             void OnThumbstickEvent(const RE::ThumbstickEvent* event) override
             {
-                if (!event || event->QIDCode() != RE::ThumbstickEvent::kLeft ||
+                if (!event) return;
+                if (event->QIDCode() == RE::ThumbstickEvent::kRight) {
+                    const_cast<RE::ThumbstickEvent*>(event)->handled = RE::InputEvent::HANDLED_RESULT::kStop;
+                    Scaleform::GFx::Value axis(static_cast<double>(event->yValue));
+                    InvokePanel("root1.Menu_mc.HandleRightStickAxis", std::addressof(axis), 1);
+                    return;
+                }
+                if (event->QIDCode() != RE::ThumbstickEvent::kLeft ||
                     event->prevDir == event->currDir || event->currDir == RE::DIRECTION_VAL::kNone) return;
                 const_cast<RE::ThumbstickEvent*>(event)->handled = RE::InputEvent::HANDLED_RESULT::kStop;
                 switch (event->currDir) {
@@ -548,6 +585,33 @@ namespace AIE::ScaleformUI
             char keyBuffer_[2]{ 0, 0 };
         };
 
+        void SetSearchTextEntryMode(bool enabled)
+        {
+            if (g_textEntryOwned == enabled) return;
+            auto* controls = RE::ControlMap::GetSingleton();
+            if (!controls) return;
+            Scaleform::GFx::Value flag(enabled);
+            bool bridged = false;
+            if (g_menu && g_menu->uiMovie && g_menu->uiMovie->asMovieRoot) {
+                if (enabled) {
+                    // Prefer the official F4SE callback: legacy IME plugins hook
+                    // this callback as well as the engine text-entry function.
+                    for (const auto* path : { "root.f4se.AllowTextInput", "root1.f4se.AllowTextInput" }) {
+                        if (g_menu->uiMovie->Invoke(path, nullptr, std::addressof(flag), 1)) {
+                            g_textEntryBridgePath = path; bridged = true; break;
+                        }
+                    }
+                } else if (g_textEntryBridgePath) {
+                    bridged = g_menu->uiMovie->Invoke(g_textEntryBridgePath, nullptr, std::addressof(flag), 1);
+                }
+            }
+            if (!bridged) controls->SetTextEntryMode(enabled);
+            g_textEntryOwned = enabled;
+            REX::INFO("[AIE] SEARCH_TEXT_ENTRY enabled={} bridge={} engine-count={}",
+                enabled, bridged ? "f4se" : "engine", static_cast<int>(controls->byTextEntryCount));
+            if (!enabled) g_textEntryBridgePath = nullptr;
+        }
+
         void DirectFunctionHandler::Call(const Params& params)
         {
             if (g_menu) g_menu->Call(params);
@@ -626,6 +690,7 @@ namespace AIE::ScaleformUI
 
     void Close()
     {
+        ClearSearchTextEntry();
         if (!IsOpen()) return;
         if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
             queue->AddMessage(RE::BSFixedString(kMenuName.data()), RE::UI_MESSAGE_TYPE::kHide);
@@ -635,6 +700,7 @@ namespace AIE::ScaleformUI
     void SetHidden(bool hidden)
     {
         g_hidden = hidden;
+        SetSearchTextEntryMode(g_searchFocused && !hidden);
         if (g_menu && g_menu->uiMovie && g_menu->uiMovie->asMovieRoot) {
             Scaleform::GFx::Value value(hidden);
             g_menu->uiMovie->Invoke("root1.Menu_mc.SetHidden", nullptr, std::addressof(value), 1);

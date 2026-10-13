@@ -6,6 +6,7 @@ package aozora.extractor
     import flash.display.MovieClip;
     import flash.display.Shape;
     import flash.display.Sprite;
+    import flash.display.Stage;
     import flash.events.Event;
     import flash.events.FocusEvent;
     import flash.events.MouseEvent;
@@ -167,6 +168,13 @@ package aozora.extractor
         private var focusSource:int = 0;
         private var mouseMovedSinceInput:Boolean = false;
         private var hasMousePosition:Boolean = false;
+        private var scrollDrag:Object = null;
+        private var dragStage:Stage = null;
+        private var scrollClickBlockedUntil:int = 0;
+        private var rightScrollAxis:Number = 0;
+        private var rightScrollRemainder:Number = 0;
+        private var rightScrollTime:int = 0;
+        private var rightScrollTimer:Timer = new Timer(40);
         private var lastMouseStageX:Number = 0;
         private var lastMouseStageY:Number = 0;
         private var hoverTabName:String = "";
@@ -216,6 +224,7 @@ package aozora.extractor
             pluginSearchTimer.addEventListener(TimerEvent.TIMER_COMPLETE, dispatchPluginSearch);
             addEventListener(Event.ADDED_TO_STAGE, onMascotAdded);
             addEventListener(Event.REMOVED_FROM_STAGE, onMascotRemoved);
+            rightScrollTimer.addEventListener(TimerEvent.TIMER, onRightScrollTick);
             decorativeArtwork = null;
             panelBackground = blend(accent, 0x071012, 0.055);
             mouseEnabled = true;
@@ -237,6 +246,8 @@ package aozora.extractor
         public function ApplySnapshot(snapshot:Object):void
         {
             if (!snapshot) return;
+            endScrollbarDrag();
+            stopRightScroll();
             var wasExtractPage:Boolean = page == "extract";
             if (snapshot.mascotEnabled != null) mascotEnabled = Boolean(snapshot.mascotEnabled);
             if (snapshot.plugins is Array) plugins = snapshot.plugins as Array;
@@ -297,6 +308,7 @@ package aozora.extractor
         public function SetHidden(value:Boolean):void
         {
             if (visible && value) mascotPage = "";
+            if (value) { endScrollbarDrag(); stopRightScroll(); }
             visible = !value;
             if (!value && mascotLayer) renderMascot();
         }
@@ -460,7 +472,7 @@ package aozora.extractor
             }
             rendering = false;
             if (searchFocused && searchField && stage) {
-                stage.focus = null;
+                stage.focus = searchField;
                 searchCaretIndex = Math.max(0, Math.min(searchCaretIndex, searchField.text.length));
                 searchField.setSelection(searchCaretIndex, searchCaretIndex);
             }
@@ -785,7 +797,7 @@ package aozora.extractor
         private function drawPluginScrollTrack(target:Sprite, x:Number, y:Number, height:Number,
             itemCount:int, visibleCount:int, start:int):void
         {
-            drawScrollTrack(target, x, y, 3, height, itemCount, visibleCount, start, true);
+            drawScrollTrack(target, x, y, 3, height, itemCount, visibleCount, start, true, "nav");
         }
 
         private function drawTabs(x:Number, y:Number, width:Number, values:Array, active:String,
@@ -941,8 +953,8 @@ package aozora.extractor
             visualTarget = searchChrome;
             updateSearchAppearance();
             searchField = new TextField();
-            searchField.type = "dynamic";
-            searchField.selectable = false;
+            searchField.type = searchFocused ? "input" : "dynamic";
+            searchField.selectable = searchFocused;
             searchField.tabEnabled = false;
             searchField.width = width - (searchFocused ? 225 : 42);
             searchField.height = 26;
@@ -966,15 +978,7 @@ package aozora.extractor
                 drawFixedText(x + 34, y + 7, width - 42, TEXT.searchPlaceholder, 13, PRIMARY_ROW_TEXT, 0.78, false, "left");
             if (searchFocused) {
                 drawFixedText(x + width - 191, y + 9, 183, "$AIE_SEARCH_EDITING", 10, focusColor, 1, false, "right");
-                var caret:Shape = new Shape();
-                var prefix:TextField = new TextField();
-                prefix.defaultTextFormat = searchField.defaultTextFormat;
-                prefix.text = query.substr(0, searchCaretIndex);
-                var caretX:Number = Math.min(x + 32 + searchField.width - 3, x + 34 + prefix.textWidth);
-                caret.graphics.lineStyle(1, focusColor, 1);
-                caret.graphics.moveTo(caretX, y + 7);
-                caret.graphics.lineTo(caretX, y + 24);
-                visualTarget.addChild(caret);
+                // Native TextField caret/selection supports IME and paste.
             }
             visualTarget = previousTarget;
         }
@@ -1010,7 +1014,7 @@ package aozora.extractor
             pluginIndex = 0;
             pluginScrollStart = 0;
             searchQueryChanged();
-            render();
+            refreshSearchViewport();
         }
 
         public function HandleSearchCharacter(code:uint):void
@@ -1029,37 +1033,47 @@ package aozora.extractor
                 code -= 0x10000;
                 inserted = String.fromCharCode(0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF));
             }
-            query = query.substr(0, searchCaretIndex) + inserted + query.substr(searchCaretIndex);
-            searchCaretIndex += inserted.length;
+            var begin:int = searchField.selectionBeginIndex;
+            var end:int = searchField.selectionEndIndex;
+            query = searchField.text.substr(0, begin) + inserted + searchField.text.substr(end);
+            query = query.substr(0, 80);
+            searchCaretIndex = Math.min(query.length, begin + inserted.length);
             pluginIndex = pluginScrollStart = 0;
             searchQueryChanged();
-            render();
+            refreshSearchViewport();
         }
 
         public function HandleSearchBackspace():void
         {
-            if (!searchFocused || page != "nav" || searchCaretIndex <= 0) return;
-            query = query.substr(0, searchCaretIndex - 1) + query.substr(searchCaretIndex);
-            --searchCaretIndex;
+            if (!searchFocused || page != "nav" || !searchField) return;
+            var begin:int = searchField.selectionBeginIndex, end:int = searchField.selectionEndIndex;
+            query = searchField.text;
+            if (begin == end) { if (begin <= 0) return; --begin; }
+            query = query.substr(0, begin) + query.substr(end);
+            searchCaretIndex = begin;
             pluginIndex = pluginScrollStart = 0;
             searchQueryChanged();
-            render();
+            refreshSearchViewport();
         }
 
         public function HandleSearchDelete():void
         {
-            if (!searchFocused || page != "nav" || searchCaretIndex >= query.length) return;
-            query = query.substr(0, searchCaretIndex) + query.substr(searchCaretIndex + 1);
+            if (!searchFocused || page != "nav" || !searchField) return;
+            var begin:int = searchField.selectionBeginIndex, end:int = searchField.selectionEndIndex;
+            query = searchField.text;
+            if (begin == end) { if (end >= query.length) return; ++end; }
+            query = query.substr(0, begin) + query.substr(end);
+            searchCaretIndex = begin;
             pluginIndex = pluginScrollStart = 0;
             searchQueryChanged();
-            render();
+            refreshSearchViewport();
         }
 
         public function MoveSearchCaret(delta:int):void
         {
             if (!searchFocused || page != "nav") return;
-            searchCaretIndex = Math.max(0, Math.min(searchCaretIndex + delta, query.length));
-            render();
+            searchCaretIndex = Math.max(0, Math.min(searchField.caretIndex + delta, query.length));
+            refreshSearchViewport();
         }
 
         public function FinishSearch():void
@@ -1074,7 +1088,20 @@ package aozora.extractor
             pluginIndex = 0;
             pluginScrollStart = 0;
             searchQueryChanged();
-            render();
+            refreshSearchViewport();
+        }
+
+        private function refreshSearchViewport():void
+        {
+            if (page != "nav" || !searchField) return;
+            // Programmatic edits and IME direct commits share query/caret state.
+            if (searchField.text != query) searchField.text = query;
+            searchCaretIndex = Math.max(0, Math.min(searchCaretIndex, query.length));
+            if (stage && searchFocused) stage.focus = searchField;
+            searchField.setSelection(searchCaretIndex, searchCaretIndex);
+            rebuildPluginViewport();
+            var shown:Array = visiblePlugins();
+            if (pluginCounter) pluginCounter.text = shown.length ? (pluginIndex + 1) + " / " + shown.length : "0 / 0";
         }
 
         private function onSearchOutsideClick(event:MouseEvent):void
@@ -1089,14 +1116,15 @@ package aozora.extractor
         private function setSearchFocus(value:Boolean, repaint:Boolean = true):void
         {
             if (searchFocused == value) return;
+            if (value) { endScrollbarDrag(); stopRightScroll(); }
             searchFocused = value;
             if (searchField) {
-                searchField.type = "dynamic";
-                searchField.selectable = false;
+                searchField.type = value ? "input" : "dynamic";
+                searchField.selectable = value;
             }
             if (BGSCodeObj && BGSCodeObj.SearchFocus is Function) BGSCodeObj.SearchFocus(value);
             if (!value && searchField && stage && stage.focus == searchField) stage.focus = null;
-            if (value && searchField && stage) stage.focus = null;
+            if (value && searchField && stage) stage.focus = searchField;
             if (repaint) render();
         }
 
@@ -1192,7 +1220,7 @@ package aozora.extractor
                 layer.addChild(row);
             }
             drawScrollTrack(layer, x + width - 9, listY + 4, 3, listHeight - 8,
-                source.length, maxRows, start, focused);
+                source.length, maxRows, start, focused, kind);
         }
 
         private function itemVisibleRows(height:Number):int
@@ -1429,24 +1457,188 @@ package aozora.extractor
             else { g.moveTo(0, height - 0.5); g.lineTo(width, height - 0.5); }
         }
 
-        // Adapted from Favorites updateScrollBar; no changes to scrolling/input state.
         private function drawScrollTrack(target:Sprite, x:Number, y:Number, width:Number, height:Number,
-            itemCount:int, visibleCount:int, start:int, focused:Boolean):void
+            itemCount:int, visibleCount:int, start:int, focused:Boolean, kind:String):void
         {
             if (itemCount <= visibleCount) return;
-            var rail:Shape = new Shape(), g:Graphics = rail.graphics;
-            rail.name = "scrollbar";
-            var weight:Number = focused ? 1 : 0.62;
+            var rail:Sprite = new Sprite(), g:Graphics = rail.graphics;
+            rail.name = "scrollbar"; rail.x = x + 4; rail.y = y;
+            rail.mouseChildren = false; rail.buttonMode = true;
+            // Wider transparent hit area, while preserving the existing thin rail.
+            g.beginFill(0xFFFFFF, 0.001); g.drawRect(-7, 0, width + 23, height); g.endFill();
             g.lineStyle(1, themeColor(0.60), 0.32);
-            g.moveTo(x + width / 2, y + 14); g.lineTo(x + width / 2, y + height - 14);
-            drawTriangle(g, x + width / 2, y + 4, 3, true, themeColor(0.80));
-            drawTriangle(g, x + width / 2, y + height - 4, 3, false, themeColor(0.80));
-            var thumbHeight:Number = Math.max(26, (height - 28) * visibleCount / itemCount);
+            g.moveTo(width / 2, 14); g.lineTo(width / 2, height - 14);
+            drawTriangle(g, width / 2, 4, 3, true, themeColor(0.80));
+            drawTriangle(g, width / 2, height - 4, 3, false, themeColor(0.80));
+            var thumbHeight:Number = Math.min(height - 28, Math.max(26, (height - 28) * visibleCount / itemCount));
             var maxStart:int = Math.max(1, itemCount - visibleCount);
-            var thumbY:Number = y + 14 + (height - 28 - thumbHeight) * Math.min(1, start / maxStart);
-            fillRect(g, themeColor(1.0), 0.74, x, thumbY, width, thumbHeight);
-            rail.alpha = weight;
+            var thumbY:Number = 14 + (height - 28 - thumbHeight) * Math.min(1, start / maxStart);
+            fillRect(g, themeColor(1.0), 0.74, 0, thumbY, width, thumbHeight);
+            componentMetrics[rail] = { kind: kind, width: width, focused: focused, hovered: false, height: height, thumbHeight: thumbHeight,
+                thumbY: thumbY, start: start, maxStart: maxStart, visibleCount: visibleCount };
             target.addChild(rail);
+            paintScrollbar(rail);
+            rail.addEventListener(MouseEvent.ROLL_OVER, onScrollbarHover);
+            rail.addEventListener(MouseEvent.ROLL_OUT, onScrollbarHover);
+            rail.addEventListener(MouseEvent.MOUSE_DOWN, onScrollbarDown);
+        }
+
+        private function paintScrollbar(rail:Sprite):void
+        {
+            var m:Object = componentMetrics[rail];
+            if (!m) return;
+            var active:Boolean = (scrollDrag && scrollDrag.kind == m.kind) || Boolean(m.hovered);
+            var g:Graphics = rail.graphics;
+            g.clear();
+            // Hit area stays wide but invisible, including while hovered or dragging.
+            fillRect(g, themeColor(1), 0.001, -7, 0, Number(m.width) + 23, Number(m.height));
+            g.lineStyle(1, themeColor(active ? 1 : 0.60), active ? 0.65 : 0.32);
+            g.moveTo(Number(m.width) / 2, 14); g.lineTo(Number(m.width) / 2, Number(m.height) - 14);
+            drawTriangle(g, Number(m.width) / 2, 4, 3, true, themeColor(active ? 1 : 0.80));
+            drawTriangle(g, Number(m.width) / 2, Number(m.height) - 4, 3, false, themeColor(active ? 1 : 0.80));
+            fillRect(g, themeColor(1), active ? 1 : 0.74, 0,
+                Number(m.thumbY), Number(m.width), Number(m.thumbHeight));
+            rail.alpha = active || m.focused ? 1 : 0.62;
+        }
+
+        private function onScrollbarHover(event:MouseEvent):void
+        {
+            var rail:Sprite = event.currentTarget as Sprite;
+            var m:Object = componentMetrics[rail];
+            if (!m) return;
+            m.hovered = event.type == MouseEvent.ROLL_OVER;
+            paintScrollbar(rail);
+        }
+
+        private function onScrollbarDown(event:MouseEvent):void
+        {
+            if (modalOpen) return;
+            var rail:Sprite = event.currentTarget as Sprite;
+            var metrics:Object = componentMetrics[rail];
+            if (!metrics || !stage) return;
+            stopRightScroll(); endScrollbarDrag();
+            if (searchFocused) setSearchFocus(false);
+            focusSource = 3;
+            var point:Point = globalToLocal(new Point(event.stageX, event.stageY));
+            var origin:Point = globalToLocal(rail.localToGlobal(new Point(0, 0)));
+            var pos:Number = point.y - origin.y;
+            var thumbTop:Number = origin.y + Number(metrics.thumbY);
+            scrollClickBlockedUntil = getTimer() + 200;
+            if (pos >= Number(metrics.thumbY) && pos <= Number(metrics.thumbY) + Number(metrics.thumbHeight)) {
+                scrollDrag = { kind: metrics.kind, top: origin.y + 14,
+                    travel: Number(metrics.height) - 28 - Number(metrics.thumbHeight),
+                    maxStart: int(metrics.maxStart), grab: point.y - thumbTop };
+                dragStage = stage;
+                dragStage.addEventListener(MouseEvent.MOUSE_MOVE, onScrollbarMove, true);
+                dragStage.addEventListener(MouseEvent.MOUSE_UP, onScrollbarUp, true);
+                paintScrollbar(rail);
+                scrollToViewport(String(metrics.kind), int(metrics.start));
+            } else {
+                var delta:int = pos < 14 ? -1 : (pos > Number(metrics.height) - 14 ? 1 :
+                    (pos < Number(metrics.thumbY) ? -int(metrics.visibleCount) : int(metrics.visibleCount)));
+                scrollToViewport(String(metrics.kind), int(metrics.start) + delta);
+            }
+            event.preventDefault(); event.stopImmediatePropagation();
+        }
+
+        private function onScrollbarMove(event:MouseEvent):void
+        {
+            if (!scrollDrag) return;
+            if (!event.buttonDown) { endScrollbarDrag(); return; }
+            var point:Point = globalToLocal(new Point(event.stageX, event.stageY));
+            var ratio:Number = (point.y - Number(scrollDrag.grab) - Number(scrollDrag.top)) /
+                Math.max(1, Number(scrollDrag.travel));
+            scrollToViewport(String(scrollDrag.kind), Math.round(Math.max(0, Math.min(1, ratio)) * int(scrollDrag.maxStart)));
+            event.preventDefault(); event.stopImmediatePropagation();
+        }
+
+        private function onScrollbarUp(event:MouseEvent):void
+        {
+            endScrollbarDrag();
+            event.preventDefault(); event.stopImmediatePropagation();
+        }
+
+        private function endScrollbarDrag():void
+        {
+            if (dragStage) {
+                dragStage.removeEventListener(MouseEvent.MOUSE_MOVE, onScrollbarMove, true);
+                dragStage.removeEventListener(MouseEvent.MOUSE_UP, onScrollbarUp, true);
+            }
+            if (scrollDrag) scrollClickBlockedUntil = getTimer() + 200;
+            scrollDrag = null; dragStage = null;
+            for (var node:Object in componentMetrics) {
+                if (node is Sprite && Sprite(node).name == "scrollbar") paintScrollbar(Sprite(node));
+            }
+        }
+
+        private function scrollToViewport(kind:String, requestedStart:int):void
+        {
+            if (modalOpen) return;
+            var source:Array = kind == "nav" ? visiblePlugins() :
+                (kind == "left" ? visibleSessionItems(itemCategory) : visibleItems(items, itemCategory));
+            if (!source.length) return;
+            var rows:int = kind == "nav" ? NAV_VISIBLE_ROWS : itemVisibleRows(EXTRACT_COLUMNS_HEIGHT);
+            var start:int = clamp(requestedStart, 0, Math.max(0, source.length - rows));
+            var fullRows:int = Math.min(rows, source.length - start);
+            // Drawn rows are integral. The selected row is always completely visible.
+            var index:int = start + int((fullRows - 1) / 2);
+            var oldStart:int = kind == "nav" ? pluginScrollStart : (kind == "left" ? leftScrollStart : rightScrollStart);
+            var oldIndex:int = kind == "nav" ? pluginIndex : (kind == "left" ? leftIndex : rightIndex);
+            if (start == oldStart && index == oldIndex && (kind == "nav" || pane == kind)) return;
+            searchMouseGuard = true; mouseMovedSinceInput = false; captureMouseBaseline();
+            if (kind == "nav") {
+                pluginScrollStart = start; pluginIndex = index; rebuildPluginViewport();
+            } else {
+                searchTopIndex = -1;
+                setActivePane(kind);
+                if (kind == "left") { leftScrollStart = start; leftIndex = index; }
+                else { rightScrollStart = start; rightIndex = index; }
+                rebuildItemViewport(kind);
+            }
+        }
+
+        public function HandleRightStickAxis(value:Number):void
+        {
+            if (!visible || !stage || modalOpen || searchFocused || scrollDrag || Math.abs(value) < 0.28) {
+                stopRightScroll(); return;
+            }
+            if (inputMode != "gamepad") { inputMode = "gamepad"; render(); }
+            focusSource = 2;
+            var first:Boolean = !rightScrollTimer.running;
+            var changed:Boolean = rightScrollAxis * value < 0;
+            rightScrollAxis = Math.max(-1, Math.min(1, value));
+            if (first || changed) {
+                rightScrollRemainder = 0; rightScrollTime = getTimer();
+                scrollRightStickRows(rightScrollAxis > 0 ? -1 : 1);
+            }
+            rightScrollTimer.start();
+        }
+
+        private function scrollRightStickRows(delta:int):void
+        {
+            var kind:String = page == "nav" ? "nav" : pane;
+            var start:int = kind == "nav" ? pluginScrollStart : (kind == "left" ? leftScrollStart : rightScrollStart);
+            scrollToViewport(kind, start + delta);
+        }
+
+        private function onRightScrollTick(event:TimerEvent):void
+        {
+            if (!visible || !stage || modalOpen || searchFocused || scrollDrag) { stopRightScroll(); return; }
+            var now:int = getTimer();
+            var seconds:Number = Math.min(0.10, (now - rightScrollTime) / 1000);
+            rightScrollTime = now;
+            var strength:Number = Math.max(0, (Math.abs(rightScrollAxis) - 0.28) / 0.72);
+            rightScrollRemainder += seconds * (4 + strength * 20);
+            var rows:int = int(rightScrollRemainder);
+            if (rows > 0) {
+                rightScrollRemainder -= rows;
+                scrollRightStickRows(rightScrollAxis > 0 ? -rows : rows);
+            }
+        }
+
+        private function stopRightScroll():void
+        {
+            rightScrollTimer.stop(); rightScrollAxis = 0; rightScrollRemainder = 0;
         }
 
         private function updateRowAppearance(row:Sprite, selected:Boolean):void
@@ -1711,7 +1903,10 @@ package aozora.extractor
             for (var i:int = 0; i < shown.length; ++i) {
                 if (String(shown[i].name) == selectedName) { pluginIndex = i; break; }
             }
-            if (page == "nav") render();
+            if (page == "nav") {
+                if (searchFocused) refreshSearchViewport();
+                else render();
+            }
         }
 
         private function visiblePlugins():Array
@@ -1861,6 +2056,7 @@ package aozora.extractor
             modalIndex = modalValues.indexOf(Math.min(configured, limit));
             modalFormID = uint(active.formID);
             modalTake = pane == "right";
+            endScrollbarDrag(); stopRightScroll();
             modalOpen = true;
             render();
         }
@@ -1908,6 +2104,7 @@ package aozora.extractor
 
         private function onMouseMove(event:MouseEvent):void
         {
+            if (scrollDrag) return;
             var moved:Boolean = !hasMousePosition ||
                 Math.abs(event.stageX - lastMouseStageX) > 0.1 ||
                 Math.abs(event.stageY - lastMouseStageY) > 0.1;
@@ -2127,6 +2324,7 @@ package aozora.extractor
 
         private function onPluginRowClick(event:MouseEvent):void
         {
+            if (scrollDrag || getTimer() < scrollClickBlockedUntil || searchMouseGuard) return;
             var row:Sprite = event.currentTarget as Sprite;
             if (!row) return;
             focusSource = 3;
@@ -2139,6 +2337,7 @@ package aozora.extractor
 
         private function onPluginRowOver(event:MouseEvent):void
         {
+            if (scrollDrag || searchMouseGuard) return;
             var row:Sprite = event.currentTarget as Sprite;
             if (!row) return;
             focusSource = 3;
@@ -2163,6 +2362,7 @@ package aozora.extractor
 
         private function onItemRowClick(event:MouseEvent):void
         {
+            if (scrollDrag || getTimer() < scrollClickBlockedUntil || searchMouseGuard) return;
             if (searchMouseGuard) return;
             var row:Sprite = event.currentTarget as Sprite;
             if (!row) return;
@@ -2180,6 +2380,7 @@ package aozora.extractor
 
         private function onItemRowOver(event:MouseEvent):void
         {
+            if (scrollDrag || searchMouseGuard) return;
             if (searchMouseGuard) return;
             var row:Sprite = event.currentTarget as Sprite;
             if (!row) return;
@@ -2668,7 +2869,9 @@ package aozora.extractor
         private function onMascotRemoved(event:Event):void
         {
             if (event.target != this) return;
+            if (searchFocused) setSearchFocus(false, false);
             pluginSearchTimer.stop();
+            endScrollbarDrag(); stopRightScroll();
             if (stage) stage.removeEventListener(Event.RESIZE, onMascotResize);
             mascotPage = "";
         }

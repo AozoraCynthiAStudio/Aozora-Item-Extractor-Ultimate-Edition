@@ -2,9 +2,9 @@
 
 ## ⚠️ 重要修复 / Important Fix
 
-1.0.3 打包时，我误将实验性3D预览代码编入正式包，导致保存时CTD。对此很抱歉。现已从正式构建中移除，并增加打包检查，防止再次混入。已在AE确认保存恢复正常。
+1.0.3 打包时，我误将实验性3D预览代码编入正式包，导致保存时CTD。对此很抱歉。现已从正式构建中移除，并增加打包检查，防止再次混入。已在AE和OG确认保存恢复正常，新增MCM功能也已测试正常。
 
-I accidentally included experimental 3D preview code in the v1.0.3 release, causing CTDs when saving. I’m sorry for this packaging mistake. The code has been removed from release builds, with packaging checks added to prevent it from happening again. Saving has been confirmed working on AE.
+I accidentally included experimental 3D preview code in the v1.0.3 release, causing CTDs when saving. I’m sorry for this packaging mistake. The code has been removed from release builds, with packaging checks added to prevent it from happening again. Saving has been confirmed working on both AE and OG. The new MCM features have also been tested successfully.
 
 ## ✨ 新增功能 / New Features
 

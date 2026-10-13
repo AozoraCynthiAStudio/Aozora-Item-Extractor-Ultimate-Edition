@@ -20,7 +20,7 @@
 
 **English:** A Fallout 4 item extractor with an Aozora-styled UI, keyboard/mouse and controller support, and practical features inspired by community item extractors. [Read the full English description](docs/README_EN.md).
 
-当前版本为 **v1.0.4**：修复误混入实验性预览代码造成的保存闪退，新增 MCM 弹药数量设置，并加强搜索输入状态显示。内部插件名、脚本及表单标识沿用原实现。
+当前版本为 **v1.0.5**：新增鼠标拖动滚动条与手柄右摇杆滚动，并提升中文输入模组兼容性。内部插件名、脚本及表单标识沿用原实现。
 
 ## 界面预览
 
@@ -142,3 +142,8 @@ v1.0.3 打包时误将实验性3D预览代码编入DLL，造成进入提取页�
 - 弹药每组数量：左右切档1 / 10 / 50 / 100 / 500 / 1000，默认100。
 - INI自定义：`[ItemCount] Ammo`、`WeaponAmmo`；更改MCM选择会覆盖INI自定义，下次打开提取菜单生效。只打开MCM不会覆盖。
 - 搜索输入模式：更明显的边框、底色与“输入中”提示；Tab、Enter退出输入并保留查询。
+
+
+## v1.0.5：滚动与中文输入兼容
+
+支持鼠标拖动滚动条、点击轨道翻页，以及右摇杆滚动当前焦点所在列表。滚动后选中行完整可见。搜索输入已通过 Chinese Input（RIME）和 NA Input Support 测试；其他输入模组欢迎留言反馈。

@@ -4,7 +4,7 @@
 
 [Downloads](https://github.com/AozoraCynthiAStudio/Aozora-Item-Extractor-Ultimate-Edition/releases/latest) · [中文](../README.md) · [Build](BUILD.md)
 
-A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. The current release is **v1.0.4**, fixing a save CTD and adding ammo quantity settings and clearer search input feedback.
+A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. The current release is **v1.0.5**, adding mouse scrollbar dragging, right-stick scrolling and improved Chinese input compatibility.
 
 ![Extraction menu](../发布物料/Extractor.png)
 
@@ -90,3 +90,8 @@ I accidentally included experimental 3D preview code in the v1.0.3 DLL, causing 
 - Ammo per group: 1 / 10 / 50 / 100 / 500 / 1000 stepper, default 100.
 - Custom INI quantities: `[ItemCount] Ammo` and `WeaponAmmo`. Changing the MCM selection overrides custom values and takes effect next time the menu opens. Merely opening MCM does not overwrite them.
 - Clearer search input frame, background and typing hint. Tab and Enter finish input while preserving the query.
+
+
+## v1.0.5: scrolling and Chinese input
+
+Drag scrollbars or click their tracks to page through long lists. The controller right stick scrolls the focused list, keeping the selected row fully visible. Chinese Input (RIME) and NA Input Support have been tested successfully; requests for other input mods are welcome.
