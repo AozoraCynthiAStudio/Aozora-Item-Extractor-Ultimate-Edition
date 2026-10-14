@@ -9,6 +9,8 @@ package aozora.extractor
     import flash.display.Stage;
     import flash.events.Event;
     import flash.events.FocusEvent;
+    import flash.events.TextEvent;
+    import flash.events.KeyboardEvent;
     import flash.events.MouseEvent;
     import flash.events.IOErrorEvent;
     import flash.geom.Point;
@@ -193,6 +195,7 @@ package aozora.extractor
         private var searchArea:Rectangle;
         private var searchHovered:Boolean = false;
         private var searchField:TextField;
+        private var searchPlaceholder:TextField;
         private var searchCaretIndex:int = 0;
         private var rendering:Boolean = false;
         private var pluginCounter:TextField;
@@ -460,6 +463,7 @@ package aozora.extractor
             columnTitles = {};
             columnCounts = {};
             searchField = null;
+            searchPlaceholder = null;
             pluginCounter = null;
             footerPrimaryAction = null; footerBatchAction = null; footerAllAction = null;
             if (page == "extract") renderExtractPage();
@@ -959,12 +963,14 @@ package aozora.extractor
             searchField.width = width - (searchFocused ? 225 : 42);
             searchField.height = 26;
             searchField.x = x + 32;
-            searchField.y = y + 3;
+            searchField.y = y + 7;
             searchField.maxChars = 80;
             searchField.text = query;
             searchField.defaultTextFormat = makeFormat(13, 0xE4EBED, 1, false, "left");
             searchField.setTextFormat(searchField.defaultTextFormat);
             searchField.addEventListener(Event.CHANGE, onSearchChanged);
+            searchField.addEventListener(TextEvent.TEXT_INPUT, onSearchDefaultTextInput);
+            searchField.addEventListener(KeyboardEvent.KEY_DOWN, onSearchDefaultKey);
             searchField.addEventListener(FocusEvent.FOCUS_IN, function(event:FocusEvent):void {
                 // Automatic Scaleform field focus must not enable search mode.
                 if (!rendering && !searchFocused && stage && stage.focus == searchField)
@@ -974,8 +980,8 @@ package aozora.extractor
                 // Field replacement during redraw is not an explicit search exit.
             });
             visualTarget.addChild(searchField);
-            if (query.length == 0 && !searchFocused)
-                drawFixedText(x + 34, y + 7, width - 42, TEXT.searchPlaceholder, 13, PRIMARY_ROW_TEXT, 0.78, false, "left");
+            searchPlaceholder = drawFixedText(x + 32, y + 7, width - 42, TEXT.searchPlaceholder, 13, PRIMARY_ROW_TEXT, 0.78, false, "left");
+            searchPlaceholder.visible = query.length == 0 && !searchFocused;
             if (searchFocused) {
                 drawFixedText(x + width - 191, y + 9, 183, "$AIE_SEARCH_EDITING", 10, focusColor, 1, false, "right");
                 // Native TextField caret/selection supports IME and paste.
@@ -1003,6 +1009,24 @@ package aozora.extractor
             g.drawCircle(searchArea.x + 13, searchArea.y + 15, 6);
             g.moveTo(searchArea.x + 18, searchArea.y + 20);
             g.lineTo(searchArea.x + 21, searchArea.y + 25);
+        }
+
+        private function onSearchDefaultTextInput(event:TextEvent):void
+        {
+            // CharacterEvent is the sole insertion owner. IME plugins may also
+            // send a Scaleform textInput event to the focused editable field.
+            // Cancel that default insertion, without comparing/deduplicating text.
+            if (searchFocused) event.preventDefault();
+        }
+
+        private function onSearchDefaultKey(event:KeyboardEvent):void
+        {
+            // Native input already handles deletion and caret movement. Keep
+            // clipboard shortcuts available, but prevent a second field edit.
+            if (searchFocused && !event.ctrlKey &&
+                (event.keyCode == 8 || event.keyCode == 46 ||
+                 event.keyCode == 37 || event.keyCode == 39 ||
+                 event.keyCode == 13 || event.keyCode == 9)) event.preventDefault();
         }
 
         private function onSearchChanged(event:Event):void
@@ -1096,6 +1120,7 @@ package aozora.extractor
             if (page != "nav" || !searchField) return;
             // Programmatic edits and IME direct commits share query/caret state.
             if (searchField.text != query) searchField.text = query;
+            if (searchPlaceholder) searchPlaceholder.visible = query.length == 0 && !searchFocused;
             searchCaretIndex = Math.max(0, Math.min(searchCaretIndex, query.length));
             if (stage && searchFocused) stage.focus = searchField;
             searchField.setSelection(searchCaretIndex, searchCaretIndex);
@@ -1118,6 +1143,7 @@ package aozora.extractor
             if (searchFocused == value) return;
             if (value) { endScrollbarDrag(); stopRightScroll(); }
             searchFocused = value;
+            if (searchPlaceholder) searchPlaceholder.visible = query.length == 0 && !value;
             if (searchField) {
                 searchField.type = value ? "input" : "dynamic";
                 searchField.selectable = value;
@@ -1141,7 +1167,7 @@ package aozora.extractor
             rowH:Number, maxRows:int, start:int, kind:String, layer:Sprite, scrollX:Number):void
         {
             if (!source || source.length == 0) {
-                drawFixedText(x + 18, y + 16, width - 36, trimmedSearch(query).length ? "$AIE_NO_SEARCH_RESULTS" : TEXT.noPlugins, 14, 0x9EB1B7, 0.84, false, "left");
+                addTextTo(layer, x + 18, y + 16, width - 36, trimmedSearch(query).length ? "$AIE_NO_SEARCH_RESULTS" : TEXT.noPlugins, 14, 0x9EB1B7, 0.84, false, "left");
                 return;
             }
             start = clamp(start, 0, Math.max(0, source.length - maxRows));

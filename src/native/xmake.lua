@@ -1,7 +1,7 @@
 set_xmakever("3.0.0")
 
 set_project("AozoraItemExtractor")
-set_version("1.0.5")
+set_version("1.0.6")
 set_arch("x64")
 set_languages("c++23")
 set_warnings("allextra")

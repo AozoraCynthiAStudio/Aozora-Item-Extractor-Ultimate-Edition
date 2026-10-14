@@ -1307,7 +1307,7 @@ namespace
 
 AIE_EXPORT F4SE::PluginVersionData F4SEPlugin_Version = []() noexcept {
     F4SE::PluginVersionData version{};
-    version.PluginVersion({ 1, 0, 5, 0 });
+    version.PluginVersion({ 1, 0, 6, 0 });
     version.PluginName(kPluginName);
     version.AuthorName("Aozora");
     version.UsesAddressLibrary(true);
@@ -1446,7 +1446,7 @@ bool RegisterPapyrus(RE::BSScript::IVirtualMachine* vm)
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* f4seInterface)
 {
     F4SE::Init(f4seInterface, { .log = true, .logName = "AozoraItemExtractor" });
-    Log("Aozora Item Extractor load build=release-1.0.5-20261013 runtime=" + F4SE::GetRuntimeVersion().string());
+    Log("Aozora Item Extractor load build=release-1.0.6-20261014 runtime=" + F4SE::GetRuntimeVersion().string());
 #ifdef AIE_PREVIEW_SPIKE
     Log("EXPERIMENTAL_PREVIEW enabled");
 #else
