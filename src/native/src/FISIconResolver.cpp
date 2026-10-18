@@ -1,4 +1,5 @@
 #include "FISIconResolver.h"
+#include "Performance.h"
 
 #include <algorithm>
 #include <array>
@@ -41,6 +42,15 @@ namespace AIE
         std::vector<AutoTagRule> g_autoTagRules;
         std::unordered_map<std::uint32_t, FISIcon> g_iconCache;
         bool g_rulesLoaded{ false };
+        std::unordered_map<std::string, std::size_t> g_tagIndex;
+        struct SectionStats
+        {
+            std::uint64_t calls{}, hits{}, misses{}, nameUs{}, autoUs{}, keywordUs{}, totalUs{}, regexTests{};
+        };
+        thread_local bool g_profiling = false;
+        thread_local std::unordered_map<std::string, SectionStats> g_sections;
+        thread_local std::uint64_t g_rulesUs = 0;
+        thread_local std::uint64_t g_regexTests = 0;
 
         std::filesystem::path GameRoot()
         {
@@ -175,6 +185,7 @@ namespace AIE
         void LoadRules()
         {
             if (g_rulesLoaded) return;
+            const auto rulesStart = Perf::NowUs();
             g_rulesLoaded = true;
             const auto data = GameRoot() / "Data" / "Interface" / "ItemSorter";
             const std::array baseCandidates{
@@ -204,15 +215,16 @@ namespace AIE
                 std::error_code autoTagError;
                 if (std::filesystem::is_regular_file(candidate, autoTagError)) ParseAutoTags(candidate);
             }
+            // Preserve the existing later-rule-wins priority.
+            for (std::size_t i = 0; i < g_tagRules.size(); ++i) g_tagIndex[g_tagRules[i].tag] = i;
+            if (g_profiling) g_rulesUs += Perf::NowUs()-rulesStart;
         }
 
         FISIcon IconForTag(std::string_view tag)
         {
             LoadRules();
-            for (auto rule = g_tagRules.rbegin(); rule != g_tagRules.rend(); ++rule) {
-                if (rule->tag == tag) return rule->icon;
-            }
-            return {};
+            const auto found = g_tagIndex.find(std::string(tag));
+            return found != g_tagIndex.end() ? g_tagRules[found->second].icon : FISIcon{};
         }
 
         std::string SectionForObject(RE::TESBoundObject* object)
@@ -238,6 +250,7 @@ namespace AIE
         {
             LoadRules();
             for (const auto& rule : g_autoTagRules) {
+                if (g_profiling && rule.section == section && !rule.wildcard && rule.pattern) ++g_regexTests;
                 if (rule.section == section && !rule.wildcard && rule.pattern &&
                     std::regex_search(name.begin(), name.end(), *rule.pattern)) {
                     auto icon = IconForTag(rule.tag);
@@ -269,22 +282,67 @@ namespace AIE
             LoadRules();
             auto* keywordForm = object ? object->As<RE::BGSKeywordForm>() : nullptr;
             if (!keywordForm) return {};
-            for (auto rule = g_tagRules.rbegin(); rule != g_tagRules.rend(); ++rule) {
-                if (keywordForm->HasKeywordString(rule->tag)) return rule->icon;
-            }
-            return {};
+            std::optional<std::size_t> best;
+            keywordForm->ForEachKeyword([&](RE::BGSKeyword* keyword) {
+                const auto found = g_tagIndex.find(keyword->formEditorID.c_str());
+                if (found != g_tagIndex.end() && (!best || found->second > *best)) best = found->second;
+                return RE::BSContainer::ForEachResult::kContinue;
+            });
+            return best ? g_tagRules[*best].icon : FISIcon{};
         }
     }
 
     FISIcon ResolveFISIcon(RE::TESBoundObject* object, const std::string& displayName)
     {
         if (!object) return {};
+        const auto started = g_profiling ? Perf::NowUs() : 0;
+        const auto section = SectionForObject(object);
+        auto* stats = g_profiling ? &g_sections[section.empty() ? "unknown" : section] : nullptr;
+        if (stats) ++stats->calls;
         const auto id = object->GetFormID();
-        if (const auto cached = g_iconCache.find(id); cached != g_iconCache.end()) return cached->second;
+        if (const auto cached = g_iconCache.find(id); cached != g_iconCache.end()) {
+            if (stats) { ++stats->hits; stats->totalUs += Perf::NowUs()-started; }
+            return cached->second;
+        }
+        if (stats) ++stats->misses;
+        auto phase = stats ? Perf::NowUs() : 0;
         auto icon = IconForName(displayName);
-        if (icon.className.empty()) icon = IconForAutoTag(displayName, SectionForObject(object));
-        if (icon.className.empty()) icon = IconForKeywords(object);
+        if (stats) stats->nameUs += Perf::NowUs()-phase;
+        if (icon.className.empty()) {
+            phase = stats ? Perf::NowUs() : 0;
+            const auto tests = g_regexTests;
+            icon = IconForAutoTag(displayName, section);
+            if (stats) { stats->autoUs += Perf::NowUs()-phase; stats->regexTests += g_regexTests-tests; }
+        }
+        if (icon.className.empty()) {
+            phase = stats ? Perf::NowUs() : 0; icon = IconForKeywords(object);
+            if (stats) stats->keywordUs += Perf::NowUs()-phase;
+        }
         g_iconCache.emplace(id, icon);
+        if (stats) stats->totalUs += Perf::NowUs()-started;
         return icon;
+    }
+
+    void ResetFISCaches()
+    {
+        AIE_PERF_LOG("[AIE-P02] stage=FISReset icons={} tags={} auto-rules={}", g_iconCache.size(), g_tagRules.size(), g_autoTagRules.size());
+        g_iconCache.clear(); g_tagRules.clear(); g_autoTagRules.clear(); g_tagIndex.clear(); g_rulesLoaded = false;
+    }
+    FISProfile::FISProfile()
+    {
+        g_sections.clear(); g_rulesUs = 0; g_regexTests = 0; g_profiling = Perf::enabled.load(std::memory_order_relaxed);
+    }
+    FISProfile::~FISProfile()
+    {
+        g_profiling = false;
+        std::uint64_t total = 0, calls = 0;
+        for (const auto& [section, stats] : g_sections) {
+            total += stats.totalUs; calls += stats.calls;
+            AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=FISSection section={} calls={} hit={} miss={} resolve-us={} name-us={} autotag-us={} keyword-us={} regex-tests={}",
+                Perf::trace, Perf::plugin, section, stats.calls, stats.hits, stats.misses, stats.totalUs,
+                stats.nameUs, stats.autoUs, stats.keywordUs, stats.regexTests);
+        }
+        AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=FISTotal calls={} resolve-us={} rules-load-us={} icon-cache={} tags={} auto-rules={}",
+            Perf::trace, Perf::plugin, calls, total, g_rulesUs, g_iconCache.size(), g_tagRules.size(), g_autoTagRules.size());
     }
 }

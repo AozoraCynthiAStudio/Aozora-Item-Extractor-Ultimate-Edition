@@ -2,6 +2,7 @@
 #define NOMINMAX
 #endif
 #include "ScaleformMenu.h"
+#include "Performance.h"
 #include "PreviewSpike.h"
 
 #include <algorithm>
@@ -62,7 +63,8 @@ namespace AIE::ScaleformUI
             kTakeAll,
             kReturnAll,
             kSearchFocus,
-            kSearchPluginsAndItems
+            kSearchPluginsAndItems,
+            kReportPerformance
         };
 
         using FunctionParams = Scaleform::GFx::FunctionHandler::Params;
@@ -194,6 +196,7 @@ namespace AIE::ScaleformUI
                 MapCodeMethodToASFunction("ReturnAll", static_cast<std::int32_t>(NativeFunction::kReturnAll));
                 MapCodeMethodToASFunction("SearchFocus", static_cast<std::int32_t>(NativeFunction::kSearchFocus));
                 MapCodeMethodToASFunction("SearchPluginsAndItems", static_cast<std::int32_t>(NativeFunction::kSearchPluginsAndItems));
+                MapCodeMethodToASFunction("ReportPerformance", static_cast<std::int32_t>(NativeFunction::kReportPerformance));
             }
 
             void InstallDirectCodeObjectFunctions()
@@ -210,7 +213,8 @@ namespace AIE::ScaleformUI
                     std::pair{ "TakeAll", NativeFunction::kTakeAll },
                     std::pair{ "ReturnAll", NativeFunction::kReturnAll },
                     std::pair{ "SearchFocus", NativeFunction::kSearchFocus },
-                    std::pair{ "SearchPluginsAndItems", NativeFunction::kSearchPluginsAndItems }
+                    std::pair{ "SearchPluginsAndItems", NativeFunction::kSearchPluginsAndItems },
+                    std::pair{ "ReportPerformance", NativeFunction::kReportPerformance }
                 };
                 for (const auto& [name, function] : functions) {
                     auto* handler = new DirectFunctionHandler();
@@ -257,6 +261,27 @@ namespace AIE::ScaleformUI
                 case NativeFunction::kSearchPluginsAndItems:
                     if (callbacks.searchPluginsAndItems) callbacks.searchPluginsAndItems(ParamString(params, 0));
                     break;
+                case NativeFunction::kReportPerformance: {
+                    const auto id = ParamUInt32(params, 0);
+                    const auto stage = ParamString(params, 1);
+                    if (stage != "render" && stage != "as-apply" && stage != "frame-ready" && stage != "icon-library" && stage != "viewport" && stage != "render-begin" && stage != "apply-begin") break;
+                    std::string plugin;
+                    std::uint64_t requested = 0;
+                    {
+                        std::lock_guard lock(g_stateMutex);
+                        if (!id || id != g_snapshot.traceID) break;
+                        plugin = g_snapshot.plugin; requested = g_snapshot.requestedUs;
+                    }
+                    const auto now = AIE::Perf::NowUs();
+                    if (asTrace_ != id) { asTrace_ = id; renderBeginUs_ = 0; applyBeginUs_ = 0; }
+                    if (stage == "render-begin") { renderBeginUs_ = now; break; }
+                    if (stage == "apply-begin") { applyBeginUs_ = now; break; }
+                    const auto phaseStart = stage == "render" ? renderBeginUs_ : (stage == "as-apply" ? applyBeginUs_ : 0);
+                    const auto window = phaseStart && now >= phaseStart ? now-phaseStart : 0;
+                    AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=AS3-{} local-ms={} native-since-request-us={} native-window-us={} detail=\"{}\"",
+                        id, plugin, stage, ParamUInt32(params, 2), requested && now >= requested ? now-requested : 0, window, ParamString(params, 3));
+                    break;
+                }
                 case NativeFunction::kSearchFocus:
                     g_searchFocused = ParamBool(params, 0);
                     SetSearchTextEntryMode(g_searchFocused && !g_hidden);
@@ -460,11 +485,14 @@ namespace AIE::ScaleformUI
             void PushSnapshot()
             {
                 if (!uiMovie || !uiMovie->asMovieRoot) return;
+                const auto perfStart = AIE::Perf::NowUs();
                 Snapshot snapshotData;
                 {
                     std::lock_guard lock(g_stateMutex);
                     snapshotData = g_snapshot;
                 }
+                const auto copyEnd = AIE::Perf::NowUs();
+                AIE::Perf::Context context(snapshotData.traceID, snapshotData.requestedUs, snapshotData.plugin);
                 Scaleform::GFx::Value snapshot;
                 Scaleform::GFx::Value plugins;
                 uiMovie->CreateArray(std::addressof(plugins));
@@ -475,10 +503,13 @@ namespace AIE::ScaleformUI
                     SetString(item, "kind", row.light ? "ESL" : "ESP");
                     plugins.PushBack(item);
                 }
+                const auto pluginsEnd = AIE::Perf::NowUs();
                 Scaleform::GFx::Value items;
-                CreateItems(items, snapshotData.items);
+                CreateItems(items, snapshotData.items, "items");
+                const auto itemsEnd = AIE::Perf::NowUs();
                 Scaleform::GFx::Value session;
-                CreateItems(session, snapshotData.session);
+                CreateItems(session, snapshotData.session, "session");
+                const auto sessionEnd = AIE::Perf::NowUs();
                 uiMovie->CreateObject(std::addressof(snapshot));
                 snapshot.SetMember("plugins", plugins);
                 snapshot.SetMember("items", items);
@@ -495,7 +526,13 @@ namespace AIE::ScaleformUI
                 theme.SetMember("b", Scaleform::GFx::Value(snapshotData.theme.b));
                 snapshot.SetMember("theme", theme);
                 snapshot.SetMember("mascotEnabled", Scaleform::GFx::Value(snapshotData.mascotEnabled));
+                snapshot.SetMember("useFISIcons", Scaleform::GFx::Value(snapshotData.useFISIcons));
+                snapshot.SetMember("perfTrace", Scaleform::GFx::Value(static_cast<double>(AIE::Perf::enabled.load() ? snapshotData.traceID : 0)));
+                const auto transferEnd = AIE::Perf::NowUs();
                 uiMovie->Invoke("root1.Menu_mc.ApplySnapshot", nullptr, std::addressof(snapshot), 1);
+                AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=PushSnapshot copy-lock-us={} plugins-us={} items-us={} session-us={} metadata-us={} apply-us={} total-us={}",
+                    snapshotData.traceID, snapshotData.plugin, copyEnd-perfStart, pluginsEnd-copyEnd, itemsEnd-pluginsEnd,
+                    sessionEnd-itemsEnd, transferEnd-sessionEnd, AIE::Perf::NowUs()-transferEnd, AIE::Perf::NowUs()-perfStart);
             }
 
         private:
@@ -520,8 +557,10 @@ namespace AIE::ScaleformUI
                 target.SetMember(key, stringValue);
             }
 
-            void CreateItems(Scaleform::GFx::Value& array, const std::vector<ItemRow>& source)
+            void CreateItems(Scaleform::GFx::Value& array, const std::vector<ItemRow>& source, const char* kind = "session-update")
             {
+                const auto start = AIE::Perf::NowUs();
+                std::size_t bytes = 0;
                 uiMovie->CreateArray(std::addressof(array));
                 for (const auto& row : source) {
                     Scaleform::GFx::Value item;
@@ -536,7 +575,10 @@ namespace AIE::ScaleformUI
                     SetString(item, "iconClass", row.iconClass);
                     item.SetMember("starterAmmoCount", Scaleform::GFx::Value(row.starterAmmoCount));
                     array.PushBack(item);
+                    bytes += row.name.size()+row.category.size()+row.iconLibrary.size()+row.iconClass.size();
                 }
+                AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=CreateItems kind={} rows={} objects={} managed-strings={} fields={} utf8-bytes={} us={}",
+                    AIE::Perf::trace, AIE::Perf::plugin, kind, source.size(), source.size(), source.size()*4, source.size()*9, bytes, AIE::Perf::NowUs()-start);
             }
 
         public:
@@ -554,6 +596,8 @@ namespace AIE::ScaleformUI
             }
 
         private:
+            std::uint32_t asTrace_{0};
+            std::uint64_t renderBeginUs_{0}, applyBeginUs_{0};
             void BeginHUDIsolation()
             {
                 if (isolatedHUDMovie_) return;
@@ -636,6 +680,7 @@ namespace AIE::ScaleformUI
 
     void SetSnapshot(Snapshot snapshot)
     {
+        AIE::Perf::Stage timing("SetSnapshot");
         {
             std::lock_guard lock(g_stateMutex);
             g_snapshot = std::move(snapshot);

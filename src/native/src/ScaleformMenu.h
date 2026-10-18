@@ -45,6 +45,9 @@ namespace AIE::ScaleformUI
         std::string page{ "nav" };
         Theme theme;
         bool mascotEnabled{ true };
+        bool useFISIcons{ true };
+        std::uint64_t traceID{0};
+        std::uint64_t requestedUs{0};
     };
 
     struct PluginSearchRow

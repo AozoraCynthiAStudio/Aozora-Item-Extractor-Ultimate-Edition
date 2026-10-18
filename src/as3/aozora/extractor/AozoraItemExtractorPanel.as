@@ -194,6 +194,46 @@ package aozora.extractor
         private var searchChrome:Sprite;
         private var searchArea:Rectangle;
         private var searchHovered:Boolean = false;
+        private var itemCategoryCache:Object = {};
+        private var useFISIcons:Boolean = true;
+        private var perfTrace:uint = 0;
+        private var perfEnterAt:int = -1;
+        private var perfApplyAt:int = 0;
+        private var perfReadyTrace:uint = 0;
+        private var perfRenderCount:uint = 0;
+        private var perfIconLoadCount:uint = 0;
+        private var perfLastViewportLog:int = -1000;
+        private var perfLastRenderLog:int = -1000;
+
+        private function reportPerformance(stageName:String, elapsed:int, detail:String):void
+        {
+            if (!perfTrace) return;
+            var now:int = getTimer();
+            if (stageName == "viewport") {
+                if (now-perfLastViewportLog < 1000) return;
+                perfLastViewportLog = now;
+            }
+            if (stageName == "render" && detail.indexOf("reason=state-update") == 0) {
+                if (now-perfLastRenderLog < 1000) return;
+                perfLastRenderLog = now;
+            }
+            if (BGSCodeObj && BGSCodeObj.ReportPerformance is Function)
+                BGSCodeObj.ReportPerformance(perfTrace, stageName, Math.max(0, elapsed), detail);
+        }
+
+        private function onPerfFrame(event:Event):void
+        {
+            if (!visible || !stage || rendering || page != "extract") return;
+            removeEventListener(Event.ENTER_FRAME, onPerfFrame);
+            if (!perfTrace || perfReadyTrace == perfTrace) return;
+            perfReadyTrace = perfTrace;
+            var pending:int = 0;
+            for (var path:String in iconLibraryLoaders) ++pending;
+            reportPerformance("frame-ready", getTimer()-perfApplyAt,
+                "proxy=ENTER_FRAME;enter-local-ms=" + (perfEnterAt >= 0 ? getTimer()-perfEnterAt : -1) +
+                ";pending-icon-libraries=" + pending + ";items=" + items.length);
+        }
+
         private var searchField:TextField;
         private var searchPlaceholder:TextField;
         private var searchCaretIndex:int = 0;
@@ -249,12 +289,17 @@ package aozora.extractor
         public function ApplySnapshot(snapshot:Object):void
         {
             if (!snapshot) return;
+            var perfStarted:int = getTimer();
+            perfTrace = uint(snapshot.perfTrace || 0);
+            perfApplyAt = perfStarted;
+            reportPerformance("apply-begin", 0, "");
             endScrollbarDrag();
             stopRightScroll();
             var wasExtractPage:Boolean = page == "extract";
             if (snapshot.mascotEnabled != null) mascotEnabled = Boolean(snapshot.mascotEnabled);
+            if (snapshot.useFISIcons != null) useFISIcons = Boolean(snapshot.useFISIcons);
             if (snapshot.plugins is Array) plugins = snapshot.plugins as Array;
-            if (snapshot.items is Array) items = snapshot.items as Array;
+            if (snapshot.items is Array) { items = snapshot.items as Array; itemCategoryCache = {}; }
             if (snapshot.session is Array) session = snapshot.session as Array;
             if (snapshot.inputMode != null) inputMode = snapshot.inputMode == "gamepad" ? "gamepad" : "keyboard";
             if (snapshot.plugin != null) activePlugin = String(snapshot.plugin);
@@ -292,8 +337,10 @@ package aozora.extractor
                     }
                 }
             }
-            render();
+            render("ApplySnapshot");
             captureMouseBaseline();
+            reportPerformance("as-apply", getTimer()-perfStarted, "items=" + items.length + ";session=" + session.length);
+            if (perfTrace && perfReadyTrace != perfTrace) addEventListener(Event.ENTER_FRAME, onPerfFrame);
         }
 
         public function UpdateSession(value:Array):void
@@ -443,8 +490,11 @@ package aozora.extractor
             return (r << 16) | (g << 8) | blue;
         }
 
-        private function render():void
+        private function render(reason:String = "state-update"):void
         {
+            var perfStarted:int = getTimer();
+            ++perfRenderCount;
+            reportPerformance("render-begin", 0, "");
             rendering = true;
             clearChildren();
             createVisualLayers();
@@ -480,6 +530,8 @@ package aozora.extractor
                 searchCaretIndex = Math.max(0, Math.min(searchCaretIndex, searchField.text.length));
                 searchField.setSelection(searchCaretIndex, searchCaretIndex);
             }
+            reportPerformance("render", getTimer()-perfStarted, "reason=" + reason + ";count=" + perfRenderCount +
+                ";category=" + itemCategory + ";pane=" + pane + ";icon-loads=" + perfIconLoadCount);
         }
 
         private function clearChildren():void
@@ -1353,7 +1405,7 @@ package aozora.extractor
         private function drawItemIcon(target:Sprite, value:Object, categoryName:String, x:Number, y:Number, color:uint):void
         {
             var iconClass:String = value && value.iconClass ? String(value.iconClass) : "";
-            if (iconClass.length > 0) {
+            if (useFISIcons && iconClass.length > 0) {
                 var library:String = value.iconLibrary ? String(value.iconLibrary) : "FallUI_IconLib.swf";
                 library = normalizeIconLibraryPath(library);
                 var domain:ApplicationDomain = iconLibraryDomains[library] as ApplicationDomain;
@@ -1402,6 +1454,7 @@ package aozora.extractor
 
         private function requestIconLibrary(path:String):void
         {
+            if (!useFISIcons) return;
             path = normalizeIconLibraryPath(path);
             if (!path.length || iconLibraryDomains[path] || iconLibraryLoaders[path] || iconLibraryFailures[path]) return;
             var loader:Loader = new Loader();
@@ -1427,7 +1480,9 @@ package aozora.extractor
             var path:String = loader ? loader.name : "";
             if (path.length && info.applicationDomain) iconLibraryDomains[path] = info.applicationDomain;
             delete iconLibraryLoaders[path];
-            render();
+            ++perfIconLoadCount;
+            reportPerformance("icon-library", 0, "event=complete;path=" + path + ";count=" + perfIconLoadCount);
+            render("icon-library-loaded");
         }
 
         private function onIconLibraryFailed(event:IOErrorEvent):void
@@ -1437,6 +1492,7 @@ package aozora.extractor
             var path:String = loader ? loader.name : "";
             delete iconLibraryLoaders[path];
             iconLibraryFailures[path] = true;
+            reportPerformance("icon-library", 0, "event=failed;path=" + path);
         }
 
         private function drawCategoryGlyph(target:Sprite, categoryName:String, x:Number, y:Number, color:uint):void
@@ -1952,9 +2008,14 @@ package aozora.extractor
 
         private function visibleItems(source:Array, categoryValue:String):Array
         {
-            return source.filter(function(value:Object, index:int, values:Array):Boolean {
-                return categoryValue == "all" || String(value.category) == categoryValue;
+            if (categoryValue == "all") return source;
+            if (source == items && itemCategoryCache[categoryValue] != null)
+                return itemCategoryCache[categoryValue] as Array;
+            var filtered:Array = source.filter(function(value:Object, index:int, values:Array):Boolean {
+                return String(value.category) == categoryValue;
             });
+            if (source == items) itemCategoryCache[categoryValue] = filtered;
+            return filtered;
         }
 
         private function visibleSessionItems(categoryValue:String):Array
@@ -2048,6 +2109,9 @@ package aozora.extractor
             var shown:Array = visiblePlugins();
             if (!shown.length) return;
             var selected:Object = shown[clampIndex(pluginIndex, shown.length)];
+            perfTrace = 0;
+            perfEnterAt = getTimer();
+            removeEventListener(Event.ENTER_FRAME, onPerfFrame);
             activePlugin = String(selected.name);
             pendingItemFocus = selected.matchCount && int(selected.matchCount) > 0;
             pendingFocusPlugin = activePlugin;
@@ -2261,6 +2325,7 @@ package aozora.extractor
 
         private function rebuildItemViewport(kind:String):void
         {
+            var perfStarted:int = getTimer();
             var layer:Sprite = kind == "left" ? leftRowsLayer : rightRowsLayer;
             if (!layer) return;
             var bounds:Object = extractionBounds();
@@ -2287,6 +2352,7 @@ package aozora.extractor
             drawItemRows(layer, x, y, width, EXTRACT_COLUMNS_HEIGHT,
                 source, selected, start, focused, kind);
             updateMascotTip();
+            reportPerformance("viewport", getTimer()-perfStarted, "pane=" + kind + ";category=" + itemCategory);
         }
 
         private function scrollItemViewport(kind:String, delta:int):void
@@ -2895,6 +2961,7 @@ package aozora.extractor
         private function onMascotRemoved(event:Event):void
         {
             if (event.target != this) return;
+            removeEventListener(Event.ENTER_FRAME, onPerfFrame);
             if (searchFocused) setSearchFocus(false, false);
             pluginSearchTimer.stop();
             endScrollbarDrag(); stopRightScroll();

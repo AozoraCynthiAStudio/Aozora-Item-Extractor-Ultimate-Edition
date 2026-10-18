@@ -55,7 +55,7 @@ for lang in ['en','cn']:
  p=patch/f'Interface/Translations/AozoraItemExtractor_{lang}.txt';p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(text)
 (patch/'AozoraItemExtractor.esp').write_bytes(translated);shutil.copyfile(r/'README_汉化补丁.txt',patch/'README_汉化补丁.txt');writezip(patch,out/(patchName+'.zip'))
 with zipfile.ZipFile(out/(sourceName+'.zip'),'w',zipfile.ZIP_DEFLATED) as z:
- for folder in ['src','assets','Data','mcm','translations','tools','docs','licenses','发布物料']:
+ for folder in ['src','assets','Data','mcm','translations','tools','docs','licenses']:
   for p in sorted((r/folder).rglob('*')):
    if p.is_file() and not (folder == '发布物料' and p.suffix.lower() in {'.mp4','.mov','.mkv','.webm','.avi'}) and not any(v in ['build','.xmake','__pycache__'] for v in p.relative_to(r/folder).parts):z.write(p,p.relative_to(r).as_posix())
  for p in r.iterdir():
@@ -64,5 +64,5 @@ lines=[]
 for name in [coreName,patchName,sourceName]:
  p=out/(name+'.zip');lines.append(hashlib.sha256(p.read_bytes()).hexdigest().upper()+'  '+p.name)
 (out/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n',encoding='utf-8')
-(out/'MANIFEST.json').write_text(json.dumps({'version':version,'translationKeys':len(en),'coreFiles':[n for n,p in files],'patchEspChanges':edits,'runtimeBaseline':'v1.0.0 plus LT/RT category input update','runtimeChanged':True},ensure_ascii=False,indent=2),encoding='utf-8')
+(out/'MANIFEST.json').write_text(json.dumps({'version':version,'translationKeys':len(en),'coreFiles':[n for n,p in files],'patchEspChanges':edits,'runtimeBaseline':version,'runtimeChanged':True},ensure_ascii=False,indent=2),encoding='utf-8')
 print('\n'.join(lines))

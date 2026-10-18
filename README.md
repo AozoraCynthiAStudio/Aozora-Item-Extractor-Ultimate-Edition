@@ -20,7 +20,7 @@
 
 **English:** A Fallout 4 item extractor with an Aozora-styled UI, keyboard/mouse and controller support, and practical features inspired by community item extractors. [Read the full English description](docs/README_EN.md).
 
-当前版本为 **v1.0.6**：修正部分中文输入法下的重复输入、搜索提示残留及输入文字对齐。内部插件名、脚本及表单标识沿用原实现。
+当前版本为 **v1.0.7**：新增 FIS / 内置图标选择，并优化会话归还列表刷新及物品显示缓存。内部插件名、脚本及表单标识沿用原实现。
 
 ## 界面预览
 

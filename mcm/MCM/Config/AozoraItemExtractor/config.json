@@ -21,6 +21,20 @@
       }
     },
     {
+      "id": "iItemIconSource:General",
+      "type": "stepper",
+      "text": "$AIE_MCM_ICON_SOURCE",
+      "help": "$AIE_MCM_ICON_SOURCE_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingInt",
+        "default": 0,
+        "options": [
+          "$AIE_MCM_ICON_FIS",
+          "$AIE_MCM_ICON_BUILTIN"
+        ]
+      }
+    },
+    {
       "id": "iThemeColorMode:General",
       "type": "dropdown",
       "text": "$AIE_MCM_THEME_SOURCE",

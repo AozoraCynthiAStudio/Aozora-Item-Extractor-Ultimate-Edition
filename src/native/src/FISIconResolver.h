@@ -16,4 +16,12 @@ namespace AIE
     };
 
     FISIcon ResolveFISIcon(RE::TESBoundObject* object, const std::string& displayName);
+    void ResetFISCaches();
+    struct FISProfile
+    {
+        FISProfile();
+        ~FISProfile();
+        FISProfile(const FISProfile&) = delete;
+        FISProfile& operator=(const FISProfile&) = delete;
+    };
 }

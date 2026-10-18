@@ -33,6 +33,7 @@
 #include "FISIconResolver.h"
 #include "ScaleformMenu.h"
 #include "PluginSearch.h"
+#include "Performance.h"
 
 #include <Windows.h>
 
@@ -86,6 +87,7 @@ namespace
         std::string normalizedName;
         ItemCategory category = ItemCategory::kMisc;
         std::uint32_t groupCount = 1;
+        bool thrownWeapon = false;
     };
 
     struct SessionEntry
@@ -125,6 +127,10 @@ namespace
     std::unordered_map<std::string, std::vector<ItemEntry>> g_itemsByPlugin;
     std::unordered_map<std::uint32_t, SessionEntry> g_session;
     CountConfig g_config;
+    bool g_useFISIcons = true;
+    std::atomic<std::uint64_t> g_perfTrace{0};
+    std::unordered_map<std::string, std::uint64_t> g_pluginEnters;
+    std::unordered_map<std::string, std::vector<AIE::ScaleformUI::ItemRow>> g_itemRowsCache;
     RE::BSTSmartPointer<RE::BSInputEnableLayer> g_inputLayer;
     std::atomic_bool g_transferQueued{ false };
     std::atomic_bool g_monitorStarted{ false };
@@ -240,6 +246,14 @@ namespace
 
     void ReadConfig()
     {
+        const auto iconSettings = (GameRoot() / "Data" / "MCM" / "Settings" / "AozoraItemExtractor.ini").wstring();
+        const bool useFIS = GetPrivateProfileIntW(L"General", L"iItemIconSource", 0, iconSettings.c_str()) != 1;
+        if (useFIS != g_useFISIcons) {
+            // A row cached with FIS metadata must not survive a source switch.
+            g_itemRowsCache.clear();
+            g_useFISIcons = useFIS;
+        }
+        AIE::Perf::enabled.store(ReadIniUInt(L"General", L"bPerformanceDiagnostics", 0) != 0, std::memory_order_relaxed);
         ApplyMCMCountSettings();
         g_config.weapon = std::max(1u, ReadIniUInt(L"ItemCount", L"Weapon", 1));
         g_config.armor = std::max(1u, ReadIniUInt(L"ItemCount", L"Armor", 1));
@@ -608,15 +622,20 @@ namespace
             entry.normalizedName = AIE::PluginSearch::Normalize(entry.name);
             entry.category = category;
             entry.groupCount = GroupCount(category, thrown);
+            entry.thrownWeapon = thrown;
             g_itemsByPlugin[std::string(owner->GetFilename())].push_back(std::move(entry));
         }
     }
 
     void ScanLoadedData()
     {
+        AIE::Perf::Stage timing("ScanLoadedData");
         ReadConfig();
         g_plugins.clear();
         g_itemsByPlugin.clear();
+        g_itemRowsCache.clear();
+        g_pluginEnters.clear();
+        AIE::ResetFISCaches();
         g_scanReady = false;
 
         auto* data = RE::TESDataHandler::GetSingleton();
@@ -686,46 +705,26 @@ namespace
 
     std::vector<AIE::ScaleformUI::ItemRow> BuildInventoryRows()
     {
+        AIE::Perf::Stage timing("BuildInventoryRows");
         std::vector<AIE::ScaleformUI::ItemRow> result;
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player || !player->inventoryList) return result;
-        result.reserve(player->inventoryList->data.size());
-        for (const auto& inventoryItem : player->inventoryList->data) {
-            auto* object = inventoryItem.object;
+        result.reserve(g_session.size());
+        // Only session entries can be returned. Do not resolve icons or sort
+        // unrelated items from the player's potentially very large inventory.
+        for (const auto& [formID, entry] : g_session) {
+            if (!entry.Net()) continue;
+            auto* form = RE::TESForm::GetFormByID(formID);
+            auto* object = form ? form->As<RE::TESBoundObject>() : nullptr;
             if (!object || !BasicItemValid(object)) continue;
-            std::uint64_t count = 0;
-            for (auto stack = inventoryItem.stackData.get(); stack; stack = stack->nextStack.get()) {
-                count += stack->GetCount();
-            }
-            if (count == 0 || count > UINT32_MAX) continue;
-            const auto formID = object->GetFormID();
-            auto category = ItemCategory::kMisc;
-            bool thrown = false;
-            if (auto* weapon = object->As<RE::TESObjectWEAP>()) {
-                category = ItemCategory::kWeapon;
-                thrown = weapon->IsThrownWeapon();
-            } else if (object->As<RE::TESObjectARMO>()) {
-                category = ItemCategory::kArmor;
-            } else if (object->As<RE::TESAmmo>()) {
-                category = ItemCategory::kAmmo;
-            } else if (object->As<RE::AlchemyItem>()) {
-                category = ItemCategory::kAid;
-            } else if (auto* misc = object->As<RE::TESObjectMISC>(); misc && misc->componentData && !misc->componentData->empty()) {
-                category = ItemCategory::kJunk;
-            }
-            const auto session = g_session.find(formID);
-            std::uint32_t returnable = 0;
-            std::uint32_t group = GroupCount(category, thrown);
-            if (session != g_session.end()) {
-                group = session->second.groupCount;
-                const auto current = player->GetInventoryObjectCount(object);
-                const auto aboveBaseline = current > session->second.baselineCount ? current - session->second.baselineCount : 0;
-                returnable = std::min(session->second.Net(), aboveBaseline);
-            }
+            const auto count = player->GetInventoryObjectCount(object);
+            const auto aboveBaseline = count > entry.baselineCount ? count - entry.baselineCount : 0;
+            const auto returnable = std::min(entry.Net(), aboveBaseline);
+            if (!returnable) continue;
             auto name = DisplayName(object);
-            const auto icon = AIE::ResolveFISIcon(object, name);
-            result.push_back({ formID, std::move(name), CategoryName(category), static_cast<std::uint32_t>(count), group,
-                returnable, icon.library, icon.className });
+            const auto icon = g_useFISIcons ? AIE::ResolveFISIcon(object, name) : AIE::FISIcon{};
+            result.push_back({ formID, std::move(name), CategoryName(entry.category), count,
+                entry.groupCount, returnable, icon.library, icon.className });
         }
         std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
             const int nameResult = _stricmp(left.name.c_str(), right.name.c_str());
@@ -736,8 +735,14 @@ namespace
 
     AIE::ScaleformUI::Snapshot BuildUISnapshot()
     {
+        AIE::Perf::Stage timing("BuildUISnapshot");
+        AIE::FISProfile profile;
+        const auto snapshotStart = AIE::Perf::NowUs();
         AIE::ScaleformUI::Snapshot snapshot;
+        snapshot.traceID = AIE::Perf::trace;
+        snapshot.requestedUs = AIE::Perf::requestedUs;
         snapshot.inputMode = g_inputMode;
+        snapshot.useFISIcons = g_useFISIcons;
         snapshot.plugin = g_activePlugin;
         snapshot.page = g_activePlugin.empty() ? "nav" : "extract";
         snapshot.theme = ReadTheme();
@@ -748,19 +753,51 @@ namespace
         if (!g_activePlugin.empty()) {
             const auto found = g_itemsByPlugin.find(g_activePlugin);
             if (found != g_itemsByPlugin.end()) {
-                snapshot.items.reserve(found->second.size());
+                auto [cached, fresh] = g_itemRowsCache.try_emplace(g_activePlugin);
+                auto& rows = cached->second;
+                const auto rowStart = AIE::Perf::NowUs();
+                if (fresh) {
+                rows.reserve(found->second.size());
                 for (const auto& item : found->second) {
                     auto* form = RE::TESForm::GetFormByID(item.formID);
                     auto* object = form ? form->As<RE::TESBoundObject>() : nullptr;
-                    const auto icon = AIE::ResolveFISIcon(object, item.name);
+                    const auto icon = g_useFISIcons ? AIE::ResolveFISIcon(object, item.name) : AIE::FISIcon{};
                     const auto* weapon = object ? object->As<RE::TESObjectWEAP>() : nullptr;
                     const auto starterAmmo = item.category == ItemCategory::kWeapon && weapon && weapon->weaponData.ammo ? g_config.weaponAmmo : 0u;
-                    snapshot.items.push_back({ item.formID, item.name, CategoryName(item.category), 0,
+                    rows.push_back({ item.formID, item.name, CategoryName(item.category), 0,
                         item.groupCount, 0, icon.library, icon.className, starterAmmo });
                 }
+                }
+                AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=StaticRows cache={} rows={} us={} cached-plugins={}",
+                    AIE::Perf::trace, g_activePlugin, fresh ? "miss" : "hit", rows.size(), AIE::Perf::NowUs()-rowStart, g_itemRowsCache.size());
+                const auto copyStart = AIE::Perf::NowUs();
+                snapshot.items = rows;
+                const auto rowCopyUs = AIE::Perf::NowUs()-copyStart;
+                // MCM/INI quantities stay live without repeating static form/icon work.
+                for (std::size_t i = 0; i < snapshot.items.size(); ++i) {
+                    auto& row = snapshot.items[i];
+                    const auto& entry = found->second[i];
+                    row.group = GroupCount(entry.category, entry.thrownWeapon);
+                    if (row.category == "weapon") {
+                        auto* form = RE::TESForm::GetFormByID(row.formID);
+                        auto* weapon = form ? form->As<RE::TESObjectWEAP>() : nullptr;
+                        row.starterAmmoCount = weapon && weapon->weaponData.ammo ? g_config.weaponAmmo : 0u;
+                    }
+                }
+                AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=StaticRowsCopy us={}", AIE::Perf::trace, g_activePlugin, rowCopyUs);
+                std::array<std::size_t, 6> categories{};
+                std::size_t stringBytes = 0;
+                for (const auto& item : found->second) ++categories[static_cast<std::size_t>(item.category)];
+                for (const auto& row : rows) stringBytes += row.name.capacity()+row.category.capacity()+row.iconLibrary.capacity()+row.iconClass.capacity();
+                AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=Distribution total={} weapon={} armor={} aid={} ammo={} junk={} misc={} cache-string-capacity={} row-capacity-bytes={}",
+                    AIE::Perf::trace, g_activePlugin, rows.size(), categories[0],categories[1],categories[2],categories[3],categories[4],categories[5],stringBytes,rows.capacity()*sizeof(AIE::ScaleformUI::ItemRow));
             }
         }
+        const auto sessionStart = AIE::Perf::NowUs();
         snapshot.session = BuildInventoryRows();
+        AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=SnapshotCounts items={} session={} plugins={} session-us={} total-us={}",
+            AIE::Perf::trace, g_activePlugin, snapshot.items.size(), snapshot.session.size(), snapshot.plugins.size(),
+            AIE::Perf::NowUs()-sessionStart, AIE::Perf::NowUs()-snapshotStart);
         return snapshot;
     }
 
@@ -776,6 +813,8 @@ namespace
 
     void PushSessionToUI()
     {
+        AIE::Perf::Context context(0, 0, g_activePlugin);
+        AIE::FISProfile profile;
         AIE::ScaleformUI::UpdateSession(BuildInventoryRows());
     }
 
@@ -870,9 +909,10 @@ namespace
         }
         ReadConfig();
         // Scanned item identities remain cached; quantities are live configuration.
+        Log(std::string("ITEM_ICON_SOURCE mode=") + (g_useFISIcons ? "fis-with-fallback" : "built-in"));
         for (auto& [name, items] : g_itemsByPlugin) {
             for (auto& item : items) {
-                if (item.category == ItemCategory::kAmmo) item.groupCount = g_config.ammo;
+                item.groupCount = GroupCount(item.category, item.thrownWeapon);
             }
         }
         ClearSession();
@@ -896,6 +936,7 @@ namespace
 
     void OpenPluginInternal(const std::string& pluginName)
     {
+        AIE::Perf::Stage timing("OpenPluginInternal");
         const auto valid = std::find_if(g_plugins.begin(), g_plugins.end(), [&](const PluginEntry& entry) {
             return entry.name == pluginName;
         });
@@ -1045,10 +1086,19 @@ namespace
 
     void OnEnterPlugin(std::string plugin)
     {
-        QueueGameTask([plugin = std::move(plugin)] {
+        const auto trace = ++g_perfTrace;
+        const auto requested = AIE::Perf::NowUs();
+        AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=EnterRequest", trace, plugin);
+        if (!QueueGameTask([plugin = std::move(plugin), trace, requested] {
+            AIE::Perf::Context context(trace, requested, plugin);
+            AIE::Perf::Stage timing("OnEnterPlugin");
+            const auto dequeued = AIE::Perf::NowUs();
             std::lock_guard lock(g_mutex);
+            AIE_PERF_LOG("[AIE-P02] trace={} plugin=\"{}\" stage=EnterQueue queue-us={} lock-us={} visit={}",
+                trace, plugin, dequeued-requested, AIE::Perf::NowUs()-dequeued, ++g_pluginEnters[plugin]);
+            if (!g_menuOpen) return;
             OpenPluginInternal(plugin);
-        });
+        })) AIE_PERF_LOG("[AIE-P02] trace={} stage=EnterQueueFailed", trace);
     }
 
     void OnEndSession()
@@ -1254,6 +1304,9 @@ namespace
         std::lock_guard lock(g_mutex);
         g_plugins.clear();
         g_itemsByPlugin.clear();
+        g_itemRowsCache.clear();
+        g_pluginEnters.clear();
+        AIE::ResetFISCaches();
         g_scanReady = false;
         g_transferQueued = false;
         g_scanQueued = false;
@@ -1307,7 +1360,7 @@ namespace
 
 AIE_EXPORT F4SE::PluginVersionData F4SEPlugin_Version = []() noexcept {
     F4SE::PluginVersionData version{};
-    version.PluginVersion({ 1, 0, 6, 0 });
+    version.PluginVersion({ 1, 0, 7, 0 });
     version.PluginName(kPluginName);
     version.AuthorName("Aozora");
     version.UsesAddressLibrary(true);
@@ -1446,7 +1499,7 @@ bool RegisterPapyrus(RE::BSScript::IVirtualMachine* vm)
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* f4seInterface)
 {
     F4SE::Init(f4seInterface, { .log = true, .logName = "AozoraItemExtractor" });
-    Log("Aozora Item Extractor load build=release-1.0.6-20261014 runtime=" + F4SE::GetRuntimeVersion().string());
+    Log("Aozora Item Extractor load build=release-1.0.7-20261018 runtime=" + F4SE::GetRuntimeVersion().string());
 #ifdef AIE_PREVIEW_SPIKE
     Log("EXPERIMENTAL_PREVIEW enabled");
 #else

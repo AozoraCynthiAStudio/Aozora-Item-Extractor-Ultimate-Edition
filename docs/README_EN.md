@@ -4,7 +4,7 @@
 
 [Downloads](https://github.com/AozoraCynthiAStudio/Aozora-Item-Extractor-Ultimate-Edition/releases/latest) · [中文](../README.md) · [Build](BUILD.md)
 
-A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. The current release is **v1.0.6**, addressing duplicate Chinese input, lingering search messages and input text alignment.
+A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. Version **v1.0.7** adds a choice of FIS or built-in icons and improves session-return refreshes and item display caching.
 
 ![Extraction menu](../发布物料/Extractor.png)
 
