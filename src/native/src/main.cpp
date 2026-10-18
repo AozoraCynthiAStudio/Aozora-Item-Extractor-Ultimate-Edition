@@ -71,7 +71,6 @@ namespace
         std::uint32_t grenade = 1;
         std::uint32_t junk = 1;
         std::uint32_t misc = 1;
-        bool addLauncherOnLoad = true;
     };
 
     struct PluginEntry
@@ -137,6 +136,10 @@ namespace
     std::atomic<ULONGLONG> g_inputReleaseGeneration{ 0 };
     std::atomic_bool g_launcherPending{ false };
     std::atomic<ULONGLONG> g_launcherReadyAt{ 0 };
+    std::atomic_bool g_launcherWorldReady{ false };
+    std::atomic_bool g_launcherSaving{ false };
+    std::atomic_bool g_launcherCheckQueued{ false };
+    std::atomic<std::uint64_t> g_launcherGeneration{ 0 };
     std::atomic_bool g_scanQueued{ false };
     std::atomic<std::uint32_t> g_menuSerial{ 0 };
     std::atomic<ULONGLONG> g_lastMenuOpenAt{ 0 };
@@ -263,7 +266,6 @@ namespace
         g_config.junk = std::max(1u, ReadIniUInt(L"ItemCount", L"Junk", 1));
         g_config.misc = std::max(1u, ReadIniUInt(L"ItemCount", L"Misc", 1));
         g_config.weaponAmmo = std::min(static_cast<std::uint32_t>(INT32_MAX), ReadIniUInt(L"ItemCount", L"WeaponAmmo", 1000));
-        g_config.addLauncherOnLoad = ReadIniUInt(L"General", L"AddLauncherOnLoad", 1) != 0;
     }
 
     AIE::ScaleformUI::Theme ReadTheme()
@@ -1262,12 +1264,20 @@ namespace
         AIE::ScaleformUI::SetHidden(false);
     }
 
+    void QueueLauncherReconcile();
+
     void StartMonitor()
     {
         if (g_monitorStarted.exchange(true)) return;
         std::thread([] {
+            ULONGLONG nextLauncherCheck = 0;
             while (true) {
                 Sleep(g_menuOpen ? 100 : 1000);
+                const auto now = GetTickCount64();
+                if (now >= nextLauncherCheck) {
+                    nextLauncherCheck = now + 1500;
+                    QueueLauncherReconcile();
+                }
                 if (!g_menuOpen) continue;
                 QueueGameTask([] {
                     std::lock_guard lock(g_mutex);
@@ -1281,25 +1291,68 @@ namespace
     {
         AIE::ScaleformUI::RegisterMenu();
     }
-    void EnsureLauncher()
+    bool IsLauncherEnabled(bool migrate = false)
     {
-        if (!g_config.addLauncherOnLoad) return;
+        const auto settings = (GameRoot() / "Data" / "MCM" / "Settings" / "AozoraItemExtractor.ini").wstring();
+        wchar_t value[32]{};
+        GetPrivateProfileStringW(L"General", L"bInventoryLauncherEnabled", L"", value, 32, settings.c_str());
+        if (value[0]) return _wtoi(value) != 0;
+        // Preserve an existing manual opt-out. A missing new key is not an ON override.
+        const bool enabled = ReadIniUInt(L"General", L"AddLauncherOnLoad", 1) != 0;
+        if (migrate && WritePrivateProfileStringW(L"General", L"bInventoryLauncherEnabled", enabled ? L"1" : L"0", settings.c_str())) {
+            // MCM registers keys from Config/settings.ini at startup and caches them.
+            // Keep that cache in sync when migrating a legacy manual opt-out.
+            if (GetModuleHandleW(L"mcm.dll")) {
+                if (auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton()) {
+                    static_cast<RE::BSScript::IVirtualMachine*>(vm)->DispatchStaticCall(RE::BSFixedString("MCM"), RE::BSFixedString("SetModSettingBool"),
+                        RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor>{},
+                        RE::BSFixedString("AozoraItemExtractor"), RE::BSFixedString("bInventoryLauncherEnabled:General"), enabled);
+                }
+            }
+            Log(std::string("LAUNCHER_SETTING migrated=") + (enabled ? "1" : "0"));
+        }
+        return enabled;
+    }
+
+    void ReconcileLauncherInventory()
+    {
+        if (!g_launcherWorldReady || g_launcherSaving || g_menuOpen || g_launcherPending ||
+            g_transferQueued || !GameplayOpenBlockReason().empty()) return;
+        if (auto* pipboy = RE::PipboyManager::GetSingleton();
+            pipboy && (pipboy->pipboyOpening || pipboy->pipboyClosing || pipboy->pipboyRaising)) return;
         auto* data = RE::TESDataHandler::GetSingleton();
         auto* player = RE::PlayerCharacter::GetSingleton();
         auto* form = data ? data->LookupForm(kLauncherLocalFormID, kPluginFile) : nullptr;
         auto* object = form ? form->As<RE::TESBoundObject>() : nullptr;
-        if (!player || !object) {
-            Log("Launcher form unavailable; ESP may not be installed yet");
-            return;
-        }
-        if (InventoryCount(player, object) == 0) {
+        if (!player || !player->inventoryList || !object) return;
+        const bool enabled = IsLauncherEnabled(true);
+        const auto count = InventoryCount(player, object);
+        if (enabled && count == 0) {
             player->AddObjectToContainer(object, {}, 1, nullptr, RE::ITEM_REMOVE_REASON::kNone);
-            Log("Launcher item added to player");
+            Log("LAUNCHER_RECONCILE added=1 enabled=1");
+        } else if (!enabled && count > 0) {
+            RE::TESObjectREFR::RemoveItemData removal(object, static_cast<std::int32_t>(std::min(count, static_cast<std::uint32_t>(INT32_MAX))));
+            player->RemoveItem(removal);
+            Log("LAUNCHER_RECONCILE removed=" + std::to_string(count) + " enabled=0");
         }
+    }
+
+    void QueueLauncherReconcile()
+    {
+        if (!g_launcherWorldReady || g_launcherCheckQueued.exchange(true)) return;
+        const auto generation = g_launcherGeneration.load();
+        if (!QueueGameTask([generation] {
+            std::lock_guard lock(g_mutex);
+            if (generation == g_launcherGeneration.load()) ReconcileLauncherInventory();
+            g_launcherCheckQueued = false;
+        })) g_launcherCheckQueued = false;
     }
 
     void ResetRuntimeState()
     {
+        g_launcherWorldReady = false;
+        g_launcherSaving = false;
+        ++g_launcherGeneration;
         CloseMenuInternal();
         std::lock_guard lock(g_mutex);
         g_plugins.clear();
@@ -1319,16 +1372,19 @@ namespace
 
     void PrewarmAndScan()
     {
-        std::thread([] {
+        const auto generation = g_launcherGeneration.load();
+        std::thread([generation] {
             Sleep(1200);
-            QueueGameTask([] {
+            QueueGameTask([generation] {
                 std::lock_guard lock(g_mutex);
+                if (generation != g_launcherGeneration.load()) return;
                 AIE::ScaleformUI::RegisterMenu();
                 if (!g_scanReady) {
                     ScanLoadedData();
                 }
                 g_scanQueued = false;
-                EnsureLauncher();
+                g_launcherWorldReady = true;
+                ReconcileLauncherInventory();
                 if (g_menuOpen) {
                     PushPluginsToUI();
                 }
@@ -1339,6 +1395,12 @@ namespace
     void F4SEMessageHandler(F4SE::MessagingInterface::Message* message)
     {
         if (!message) return;
+        if (message->type == F4SE::MessagingInterface::kPreLoadGame) {
+            g_launcherWorldReady = false;
+            ++g_launcherGeneration;
+        }
+        if (message->type == F4SE::MessagingInterface::kPreSaveGame) g_launcherSaving = true;
+        if (message->type == F4SE::MessagingInterface::kPostSaveGame) g_launcherSaving = false;
         if (message->type == F4SE::MessagingInterface::kPreSaveGame ||
             message->type == F4SE::MessagingInterface::kPostSaveGame) {
             Log(std::string(message->type == F4SE::MessagingInterface::kPreSaveGame ? "SAVE_BEGIN" : "SAVE_END") +
@@ -1360,7 +1422,7 @@ namespace
 
 AIE_EXPORT F4SE::PluginVersionData F4SEPlugin_Version = []() noexcept {
     F4SE::PluginVersionData version{};
-    version.PluginVersion({ 1, 0, 7, 0 });
+    version.PluginVersion({ 1, 0, 8, 0 });
     version.PluginName(kPluginName);
     version.AuthorName("Aozora");
     version.UsesAddressLibrary(true);
@@ -1493,13 +1555,14 @@ bool RegisterPapyrus(RE::BSScript::IVirtualMachine* vm)
     vm->BindNativeMethod("AozoraItemExtractorNative", "CloseMenu", AIE_CloseMenu);
     vm->BindNativeMethod("AozoraItemExtractorNative", "IsMenuOpen", AIE_IsMenuOpen);
     vm->BindNativeMethod("AozoraItemExtractorNative", "OpenFromLauncher", AIE_OpenFromLauncher);
+    vm->BindNativeMethod("AozoraItemExtractorNative", "RequestLauncherSync", +[](std::monostate) { QueueLauncherReconcile(); });
     return true;
 }
 
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* f4seInterface)
 {
     F4SE::Init(f4seInterface, { .log = true, .logName = "AozoraItemExtractor" });
-    Log("Aozora Item Extractor load build=release-1.0.7-20261018 runtime=" + F4SE::GetRuntimeVersion().string());
+    Log("Aozora Item Extractor load build=release-1.0.8-20261018 runtime=" + F4SE::GetRuntimeVersion().string());
 #ifdef AIE_PREVIEW_SPIKE
     Log("EXPERIMENTAL_PREVIEW enabled");
 #else

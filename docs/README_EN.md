@@ -4,7 +4,7 @@
 
 [Downloads](https://github.com/AozoraCynthiAStudio/Aozora-Item-Extractor-Ultimate-Edition/releases/latest) · [中文](../README.md) · [Build](BUILD.md)
 
-A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. Version **v1.0.7** adds a choice of FIS or built-in icons and improves session-return refreshes and item display caching.
+A Fallout 4 item extractor with a consistent two-pane interface, plugin/item discovery, extraction and return actions, HUD theme colors, and optional mascot guidance. Version **v1.0.8** adds an MCM toggle for the inventory launcher item. Disabling it removes the item and stops automatic replacement; enabling it restores a missing item. Enabled by default for controller users.
 
 ![Extraction menu](../发布物料/Extractor.png)
 

@@ -106,6 +106,16 @@
       "text": "$AIE_MCM_SECTION_HOTKEY"
     },
     {
+      "id": "bInventoryLauncherEnabled:General",
+      "type": "switcher",
+      "text": "$AIE_MCM_LAUNCHER",
+      "help": "$AIE_MCM_LAUNCHER_HELP",
+      "valueOptions": {
+        "sourceType": "ModSettingBool",
+        "default": true
+      }
+    },
+    {
       "id": "AIE_MenuHotkey",
       "type": "hotkey",
       "text": "$AIE_MCM_HOTKEY_TEXT",

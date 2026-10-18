@@ -20,7 +20,7 @@
 
 **English:** A Fallout 4 item extractor with an Aozora-styled UI, keyboard/mouse and controller support, and practical features inspired by community item extractors. [Read the full English description](docs/README_EN.md).
 
-当前版本为 **v1.0.7**：新增 FIS / 内置图标选择，并优化会话归还列表刷新及物品显示缓存。内部插件名、脚本及表单标识沿用原实现。
+当前版本为 **v1.0.8**：新增 MCM 背包启动物品开关，关闭后移除并停止补发，重新开启会自动恢复。默认开启，方便手柄玩家。内部插件名、脚本及表单标识沿用原实现。
 
 ## 界面预览
 
